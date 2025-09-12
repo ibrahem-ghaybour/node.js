@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
-const { generateToken } = require('../utils/jwt');
+const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../utils/jwt');
 
 const router = express.Router();
 
@@ -36,12 +36,14 @@ router.post('/register', [
 
     await user.save();
 
-    // Generate token
+    // Generate tokens
     const token = generateToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
 
     res.status(201).json({
       success: true,
       token,
+      refreshToken,
       user: {
         id: user._id,
         name: user.name,
@@ -87,12 +89,14 @@ router.post('/login', [
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // Generate token
+    // Generate tokens
     const token = generateToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
 
     res.json({
       success: true,
       token,
+      refreshToken,
       user: {
         id: user._id,
         name: user.name,
@@ -126,6 +130,45 @@ router.get('/me', require('../middleware/auth').protect, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   POST /api/auth/refresh
+// @desc    Refresh access token
+// @access  Public
+router.post('/refresh', async (req, res) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    return res.status(401).json({ message: 'No refresh token provided' });
+  }
+
+  try {
+    // Verify refresh token
+    const decoded = verifyRefreshToken(refreshToken);
+    
+    // Get user from the token
+    const user = await User.findById(decoded.id).select('-password');
+    
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid refresh token' });
+    }
+    
+    // Check if user is active
+    if (!user.isActive) {
+      return res.status(401).json({ message: 'Account is deactivated' });
+    }
+    
+    // Generate new access token
+    const newToken = generateToken(user._id);
+    
+    res.json({
+      success: true,
+      token: newToken
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(401).json({ message: 'Invalid refresh token' });
   }
 });
 
