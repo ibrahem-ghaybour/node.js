@@ -15,6 +15,7 @@ router.get('/', [
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
   query('search').optional().isString().withMessage('Search must be a string'),
   query('role').optional().isIn(['user', 'admin']).withMessage('Role must be user or admin'),
+  query('status').optional().isIn(['active', 'inactive', 'maintenance']).withMessage('Status must be active, inactive, or maintenance'),
   query('isActive').optional().isBoolean().withMessage('isActive must be a boolean')
 ], async (req, res) => {
   const errors = validationResult(req);
@@ -40,6 +41,10 @@ router.get('/', [
     
     if (req.query.role) {
       query.role = req.query.role;
+    }
+    
+    if (req.query.status) {
+      query.status = req.query.status;
     }
     
     if (req.query.isActive !== undefined) {
@@ -108,6 +113,7 @@ router.put('/:id', [
   body('name').optional().isLength({ min: 1, max: 50 }).withMessage('Name must be between 1 and 50 characters'),
   body('email').optional().isEmail().withMessage('Please include a valid email'),
   body('role').optional().isIn(['user', 'admin']).withMessage('Role must be user or admin'),
+  body('status').optional().isIn(['active', 'inactive', 'maintenance']).withMessage('Status must be active, inactive, or maintenance'),
   body('isActive').optional().isBoolean().withMessage('isActive must be a boolean')
 ], async (req, res) => {
   const errors = validationResult(req);
@@ -135,6 +141,7 @@ router.put('/:id', [
     if (req.body.name) updateFields.name = req.body.name;
     if (req.body.email) updateFields.email = req.body.email;
     if (req.body.role) updateFields.role = req.body.role;
+    if (req.body.status) updateFields.status = req.body.status;
     if (req.body.isActive !== undefined) updateFields.isActive = req.body.isActive;
     updateFields.updatedAt = Date.now();
 
@@ -178,6 +185,38 @@ router.delete('/:id', [
     res.json({
       success: true,
       message: 'User deleted successfully'
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/users/status-summary
+// @desc    Get status summary for all users
+// @access  Private/Admin
+router.get('/status-summary', [
+  protect,
+  authorize('admin')
+], async (req, res) => {
+  try {
+    const summary = await User.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const total = await User.countDocuments({ isActive: true });
+
+    res.json({
+      success: true,
+      data: {
+        summary,
+        total
+      }
     });
   } catch (error) {
     console.error(error);

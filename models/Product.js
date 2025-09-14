@@ -18,10 +18,9 @@ const productSchema = new mongoose.Schema({
     min: [0, 'Price must be a positive number']
   },
   category: {
-    type: String,
-    required: [true, 'Please add a product category'],
-    trim: true,
-    maxlength: [50, 'Category cannot exceed 50 characters']
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category',
+    required: [true, 'Please add a product category']
   },
   stock: {
     type: Number,
@@ -53,8 +52,7 @@ const productSchema = new mongoose.Schema({
 // Create text index for search functionality
 productSchema.index({
   name: 'text',
-  description: 'text',
-  category: 'text'
+  description: 'text'
 });
 
 module.exports = mongoose.model('Product', productSchema);

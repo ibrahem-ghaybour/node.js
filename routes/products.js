@@ -13,7 +13,7 @@ router.get('/', [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
   query('search').optional().isString().withMessage('Search must be a string'),
-  query('category').optional().isString().withMessage('Category must be a string'),
+  query('category').optional().isMongoId().withMessage('Category must be a valid ObjectId'),
   query('minPrice').optional().isFloat({ min: 0 }).withMessage('Min price must be a positive number'),
   query('maxPrice').optional().isFloat({ min: 0 }).withMessage('Max price must be a positive number'),
   query('sortBy').optional().isIn(['name', 'price', 'createdAt', 'updatedAt']).withMessage('Invalid sort field'),
@@ -37,7 +37,7 @@ router.get('/', [
     }
     
     if (req.query.category) {
-      query.category = { $regex: req.query.category, $options: 'i' };
+      query.category = req.query.category;
     }
     
     if (req.query.minPrice !== undefined || req.query.maxPrice !== undefined) {
@@ -63,6 +63,7 @@ router.get('/', [
     // Get products
     const products = await Product.find(query)
       .populate('createdBy', 'name email')
+      .populate('category', 'name description')
       .sort(sort)
       .skip(skip)
       .limit(limit);
@@ -94,7 +95,8 @@ router.get('/:id', [
 ], async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
-      .populate('createdBy', 'name email');
+      .populate('createdBy', 'name email')
+      .populate('category', 'name description');
     
     if (!product) {
       return res.status(404).json({ message: 'Product not found' });
@@ -118,7 +120,7 @@ router.post('/', [
   body('name').notEmpty().withMessage('Product name is required').isLength({ max: 100 }).withMessage('Name cannot exceed 100 characters'),
   body('description').notEmpty().withMessage('Product description is required').isLength({ max: 1000 }).withMessage('Description cannot exceed 1000 characters'),
   body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
-  body('category').notEmpty().withMessage('Product category is required').isLength({ max: 50 }).withMessage('Category cannot exceed 50 characters'),
+  body('category').notEmpty().withMessage('Product category is required').isMongoId().withMessage('Category must be a valid ObjectId'),
   body('stock').isInt({ min: 0 }).withMessage('Stock must be a positive integer')
 ], async (req, res) => {
   const errors = validationResult(req);
@@ -127,6 +129,20 @@ router.post('/', [
   }
 
   try {
+    // Check if category exists and is active
+    const Category = require('../models/Category');
+    const category = await Category.findOne({ 
+      _id: req.body.category, 
+      isActive: true 
+    });
+    
+    if (!category) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid or inactive category' 
+      });
+    }
+    
     const product = new Product({
       name: req.body.name,
       description: req.body.description,
@@ -137,6 +153,9 @@ router.post('/', [
     });
 
     const createdProduct = await product.save();
+    
+    // Populate category for response
+    await createdProduct.populate('category', 'name description');
 
     res.status(201).json({
       success: true,
@@ -156,7 +175,7 @@ router.put('/:id', [
   body('name').optional().isLength({ max: 100 }).withMessage('Name cannot exceed 100 characters'),
   body('description').optional().isLength({ max: 1000 }).withMessage('Description cannot exceed 1000 characters'),
   body('price').optional().isFloat({ min: 0 }).withMessage('Price must be a positive number'),
-  body('category').optional().isLength({ max: 50 }).withMessage('Category cannot exceed 50 characters'),
+  body('category').optional().isMongoId().withMessage('Category must be a valid ObjectId'),
   body('stock').optional().isInt({ min: 0 }).withMessage('Stock must be a positive integer'),
   body('isActive').optional().isBoolean().withMessage('isActive must be a boolean')
 ], async (req, res) => {
@@ -182,16 +201,33 @@ router.put('/:id', [
     if (req.body.name !== undefined) updateFields.name = req.body.name;
     if (req.body.description !== undefined) updateFields.description = req.body.description;
     if (req.body.price !== undefined) updateFields.price = req.body.price;
-    if (req.body.category !== undefined) updateFields.category = req.body.category;
     if (req.body.stock !== undefined) updateFields.stock = req.body.stock;
     if (req.body.isActive !== undefined) updateFields.isActive = req.body.isActive;
     updateFields.updatedAt = Date.now();
+
+    // Check if category is being updated and validate it
+    if (req.body.category !== undefined) {
+      const Category = require('../models/Category');
+      const category = await Category.findOne({ 
+        _id: req.body.category, 
+        isActive: true 
+      });
+      
+      if (!category) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Invalid or inactive category' 
+        });
+      }
+      updateFields.category = req.body.category;
+    }
 
     const updatedProduct = await Product.findByIdAndUpdate(
       req.params.id,
       updateFields,
       { new: true, runValidators: true }
-    ).populate('createdBy', 'name email');
+    ).populate('createdBy', 'name email')
+     .populate('category', 'name description');
 
     res.json({
       success: true,

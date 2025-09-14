@@ -30,6 +30,11 @@ const userSchema = new mongoose.Schema(
       enum: ["user", "customer", "manager", "admin"],
       default: "user",
     },
+    status: {
+      type: String,
+      enum: ["active", "inactive", "maintenance"],
+      default: "active",
+    },
     isActive: {
       type: Boolean,
       default: true,

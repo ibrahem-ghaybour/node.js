@@ -16,6 +16,10 @@ connectDB();
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const productRoutes = require('./routes/products');
+const categoryRoutes = require('./routes/categories');
+const governorateRoutes = require('./routes/governorates');
+const cityRoutes = require('./routes/cities');
+const wishlistRoutes = require('./routes/wishlist');
 
 // Initialize express app
 const app = express();
@@ -39,6 +43,10 @@ app.use(express.urlencoded({ extended: true })); // URL encoding
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/categories', categoryRoutes);
+app.use('/api/governorates', governorateRoutes);
+app.use('/api/cities', cityRoutes);
+app.use('/api/wishlist', wishlistRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -59,7 +67,10 @@ app.get('/', (req, res) => {
       auth: '/api/auth',
       users: '/api/users',
       products: '/api/products',
-      health: '/api/health'
+      health: '/api/health',
+      categories: '/api/categories',
+      governorates: '/api/governorates',
+      cities: '/api/cities'
     }
   });
 });
