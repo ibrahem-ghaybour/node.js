@@ -8,13 +8,16 @@ const connectDB = require("./config/database"); // يستخدم كاش
 
 // ملاحظة: على Vercel متغيرات البيئة موجودة جاهزة، dotenv ليس ضروري
 // لو عندك .env محلي للتطوير، يبقى ممكن تستخدمه محلياً فقط
-// const dotenv = require('dotenv'); dotenv.config();
+const dotenv = require("dotenv");
+dotenv.config();
 
 const app = express();
-
+const PORT = process.env.PORT || 5000;
 // اتصل بقاعدة البيانات (مرّة واحدة مع كاش)
 connectDB();
-
+const server = app.listen(PORT, () => {
+  console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+});
 // Middleware
 app.use(helmet());
 app.use(cors());
@@ -23,13 +26,13 @@ app.use(morgan("combined"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-(function sanityEnvCheck() {
-  const has = (k) => (process.env[k] ? "OK" : "MISSING");
-  console.log("[ENV] MONGODB_URI:", has("MONGODB_URI"));
-  console.log("[ENV] JWT_SECRET:", has("JWT_SECRET"));
-  console.log("[ENV] JWT_REFRESH_SECRET:", has("JWT_REFRESH_SECRET"));
-  console.log("[ENV] NODE_ENV:", process.env.NODE_ENV);
-})();
+// (function sanityEnvCheck() {
+//   const has = (k) => (process.env[k] ? "OK" : "MISSING");
+//   console.log("[ENV] MONGODB_URI:", has("MONGODB_URI"));
+//   console.log("[ENV] JWT_SECRET:", has("JWT_SECRET"));
+//   console.log("[ENV] JWT_REFRESH_SECRET:", has("JWT_REFRESH_SECRET"));
+//   console.log("[ENV] NODE_ENV:", process.env.NODE_ENV);
+// })();
 // Routes
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/users", require("./routes/users"));
