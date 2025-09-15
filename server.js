@@ -23,6 +23,13 @@ app.use(morgan("combined"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+(function sanityEnvCheck() {
+  const has = (k) => (process.env[k] ? "OK" : "MISSING");
+  console.log("[ENV] MONGODB_URI:", has("MONGODB_URI"));
+  console.log("[ENV] JWT_SECRET:", has("JWT_SECRET"));
+  console.log("[ENV] JWT_REFRESH_SECRET:", has("JWT_REFRESH_SECRET"));
+  console.log("[ENV] NODE_ENV:", process.env.NODE_ENV);
+})();
 // Routes
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/users", require("./routes/users"));
