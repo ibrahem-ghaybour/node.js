@@ -54,6 +54,9 @@ app.get("/", (req, res) => {
     version: "1.0.0",
     endpoints: {
       auth: "/api/auth",
+      login:"/api/auth/login",
+      register: "/api/auth/register",
+      refresh:"/api/auth/refresh",
       users: "/api/users",
       products: "/api/products",
       health: "/api/health",
