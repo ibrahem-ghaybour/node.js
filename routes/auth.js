@@ -116,6 +116,7 @@ router.post(
           name: user.name,
           email: user.email,
           role: user.role,
+          avatar: user.avatar,
         },
       });
     } catch (error) {
@@ -141,6 +142,7 @@ router.get("/me", protect, async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        avatar: user.avatar,
         isActive: user.isActive,
         createdAt: user.createdAt,
       },
