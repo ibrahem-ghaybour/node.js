@@ -50,10 +50,18 @@ router.post(
       const token = generateToken(user._id);
       const refreshToken = generateRefreshToken(user._id);
 
+      // Set HttpOnly refresh token cookie (30 days)
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production', // must be HTTPS in production for SameSite=None
+        sameSite: 'none', // cross-site cookie for refresh flow
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
+        path: '/'
+      });
+
       res.status(201).json({
         success: true,
-        token,
-        refreshToken,
+        token, // Only return access token in body
         user: {
           id: user._id,
           name: user.name,
@@ -107,10 +115,18 @@ router.post(
       const token = generateToken(user._id);
       const refreshToken = generateRefreshToken(user._id);
 
+      // Set HttpOnly refresh token cookie (30 days)
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production', // Only send over HTTPS in production
+        sameSite: 'strict', // Protect against CSRF
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
+        path: '/'
+      });
+
       res.json({
         success: true,
-        token,
-        refreshToken,
+        token, // Only return access token in body
         user: {
           id: user._id,
           name: user.name,
@@ -154,10 +170,10 @@ router.get("/me", protect, async (req, res) => {
 });
 
 // @route   POST /api/auth/refresh
-// @desc    Refresh access token
+// @desc    Refresh access token using HttpOnly cookie
 // @access  Public
 router.post("/refresh", async (req, res) => {
-  const { refreshToken } = req.body;
+  const refreshToken = req.cookies.refreshToken;
 
   if (!refreshToken) {
     return res.status(401).json({ message: "No refresh token provided" });
@@ -179,8 +195,18 @@ router.post("/refresh", async (req, res) => {
       return res.status(401).json({ message: "Account is deactivated" });
     }
 
-    // Generate new access token
+    // Generate new tokens
     const newToken = generateToken(user._id);
+    const newRefreshToken = generateRefreshToken(user._id);
+
+    // Rotate the refresh token cookie (set new one)
+    res.cookie('refreshToken', newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'none',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      path: '/'
+    });
 
     res.json({
       success: true,
@@ -189,6 +215,29 @@ router.post("/refresh", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(401).json({ message: "Invalid refresh token" });
+  }
+});
+
+// @route   POST /api/auth/logout
+// @desc    Logout user by clearing refresh token cookie
+// @access  Public
+router.post("/logout", async (req, res) => {
+  try {
+    // Clear the refresh token cookie
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'none',
+      path: '/'
+    });
+
+    res.json({
+      success: true,
+      message: "Logged out successfully"
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
   }
 });
 

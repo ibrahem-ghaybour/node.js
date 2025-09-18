@@ -2,6 +2,7 @@
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
 const rateLimit = require("express-rate-limit");
 const morgan = require("morgan");
 const connectDB = require("./config/database"); // يستخدم كاش
@@ -17,7 +18,18 @@ connectDB();
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+
+// CORS configuration for cross-site requests with credentials
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000', // Replace with your frontend domain
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+app.use(cookieParser()); // Add cookie parser middleware
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 app.use(morgan("combined"));
 app.use(express.json());
