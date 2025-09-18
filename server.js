@@ -21,7 +21,7 @@ app.use(helmet());
 
 // CORS configuration for cross-site requests with credentials
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000', // Replace with your frontend domain
+  origin: 'http://localhost:3000', // Replace with your frontend domain
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
