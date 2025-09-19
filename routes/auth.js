@@ -56,7 +56,8 @@ router.post(
         secure: process.env.NODE_ENV === 'production', // must be HTTPS in production for SameSite=None
         sameSite: 'none', // cross-site cookie for refresh flow
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
-        path: '/'
+        path: '/',
+        partitioned: true,
       });
 
       res.status(201).json({
@@ -121,7 +122,8 @@ router.post(
         secure: process.env.NODE_ENV === 'production', // Only send over HTTPS in production
         sameSite: 'lax', // Protect against CSRF
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
-        path: '/'
+        path: '/',
+        partitioned
       });
 
       res.json({
@@ -205,7 +207,8 @@ router.post("/refresh", async (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'none',
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      path: '/'
+      path: '/',
+      partitioned: true,
     });
 
     res.json({
@@ -228,7 +231,8 @@ router.post("/logout", async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'none',
-      path: '/'
+      path: '/',
+      partitioned: true,
     });
 
     res.json({
