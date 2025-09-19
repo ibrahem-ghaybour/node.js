@@ -97,7 +97,7 @@ router.post(
       // Check if user exists
       const user = await User.findOne({ email }).select("+password");
       if (!user) {
-        return res.status(401).json({ message: "Invalid credentials" });
+        return res.status(422).json({ message: "Invalid credentials" });
       }
 
       // Check if user is active
@@ -108,7 +108,7 @@ router.post(
       // Check password
       const isMatch = await user.matchPassword(password);
       if (!isMatch) {
-        return res.status(401).json({ message: "Invalid credentials" });
+        return res.status(422).json({ message: "Invalid credentials" });
       }
 
       // Generate tokens
