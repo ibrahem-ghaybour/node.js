@@ -5,31 +5,41 @@ const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
 const rateLimit = require("express-rate-limit");
 const morgan = require("morgan");
-const connectDB = require("./config/database"); // يستخدم كاش
-
-// ملاحظة: على Vercel متغيرات البيئة موجودة جاهزة، dotenv ليس ضروري
-// لو عندك .env محلي للتطوير، يبقى ممكن تستخدمه محلياً فقط
-// const dotenv = require('dotenv'); dotenv.config();
+const connectDB = require("./config/database");
 
 const app = express();
 
-// اتصل بقاعدة البيانات (مرّة واحدة مع كاش)
+// 🔐 مهم لو تشغّل خلف بروكسي/HTTPS (Vercel/NGINX...)
+app.set("trust proxy", 1);
+
 connectDB();
 
-// Middleware
+// ⚠️ اضبط Helmet (الإعداد الافتراضي جيد عادة)
 app.use(helmet());
 
-// CORS configuration for cross-site requests with credentials
+// ✅ CORS مضبوط مع credentials
+const ALLOWED_ORIGINS = (process.env.APP_ORIGINS || "http://localhost:3000")
+  .split(",")
+  .map((s) => s.trim());
+
 const corsOptions = {
-  origin: 'http://localhost:3000', // Replace with your frontend domain
+  origin: (origin, cb) => {
+    // السماح أيضًا للـ SSR/health hits بدون Origin
+    if (!origin) return cb(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error("Not allowed by CORS: " + origin), false);
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  optionsSuccessStatus: 200
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
 };
 
 app.use(cors(corsOptions));
-app.use(cookieParser()); // Add cookie parser middleware
+// (اختياري) لبعض بيئات الاستضافة يمكنك إضافة:
+app.options("*", cors(corsOptions));
+
+app.use(cookieParser());
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 app.use(morgan("combined"));
 app.use(express.json());
@@ -41,8 +51,10 @@ app.use(express.urlencoded({ extended: true }));
   console.log("[ENV] JWT_SECRET:", has("JWT_SECRET"));
   console.log("[ENV] JWT_REFRESH_SECRET:", has("JWT_REFRESH_SECRET"));
   console.log("[ENV] NODE_ENV:", process.env.NODE_ENV);
+  console.log("[ENV] APP_ORIGINS:", process.env.APP_ORIGINS); // 👈 لتتأكد
 })();
-// Routes
+
+// المسارات
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/users", require("./routes/users"));
 app.use("/api/products", require("./routes/products"));
@@ -66,9 +78,9 @@ app.get("/", (req, res) => {
     version: "1.0.0",
     endpoints: {
       auth: "/api/auth",
-      login:"/api/auth/login",
+      login: "/api/auth/login",
       register: "/api/auth/register",
-      refresh:"/api/auth/refresh",
+      refresh: "/api/auth/refresh",
       users: "/api/users",
       products: "/api/products",
       health: "/api/health",
@@ -80,13 +92,9 @@ app.get("/", (req, res) => {
   });
 });
 
-// Error handler (آخر middleware)
 app.use(require("./middleware/errorHandler"));
-
-// لا يوجد app.listen على Vercel
 module.exports = app;
 
-// لوج للأخطاء غير الملتقطة (بدون server.close)
 process.on("unhandledRejection", (err) => {
   console.error("UNHANDLED REJECTION:", err);
 });

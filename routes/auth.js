@@ -6,12 +6,23 @@ const {
   generateRefreshToken,
   verifyRefreshToken,
 } = require("../utils/jwt");
+const { protect } = require("../middleware/auth");
 
 const router = express.Router();
-const { protect } = require("../middleware/auth");
-// @route   POST /api/auth/register
-// @desc    Register a new user
-// @access  Public
+
+/** إعداد موحّد للكوكي (CHIPS / cross-site) */
+const refreshCookie = {
+  httpOnly: true,
+  secure: true, // لازم مع SameSite=None
+  sameSite: "none", // cross-site
+  path: "/",
+  maxAge: 30 * 24 * 60 * 60 * 1000, // 30 يوم
+  partitioned: true, // CHIPS
+};
+
+/* --------------------
+   POST /api/auth/register
+---------------------*/
 router.post(
   "/register",
   [
@@ -31,38 +42,22 @@ router.post(
     const { name, email, password } = req.body;
 
     try {
-      // Check if user already exists
       let user = await User.findOne({ email });
       if (user) {
         return res.status(400).json({ message: "User already exists" });
       }
 
-      // Create new user
-      user = new User({
-        name,
-        email,
-        password,
-      });
-
+      user = new User({ name, email, password });
       await user.save();
 
-      // Generate tokens
       const token = generateToken(user._id);
       const refreshToken = generateRefreshToken(user._id);
 
-      // Set HttpOnly refresh token cookie (30 days)
-      res.cookie('refreshToken', refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production', // must be HTTPS in production for SameSite=None
-        sameSite: 'none', // cross-site cookie for refresh flow
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
-        path: '/',
-        partitioned: true,
-      });
+      res.cookie("refreshToken", refreshToken, refreshCookie);
 
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
-        token, // Only return access token in body
+        token,
         user: {
           id: user._id,
           name: user.name,
@@ -72,14 +67,14 @@ router.post(
       });
     } catch (error) {
       console.error(error);
-      res.status(500).json({ message: "Server error" });
+      return res.status(500).json({ message: "Server error" });
     }
   }
 );
 
-// @route   POST /api/auth/login
-// @desc    Authenticate user & get token
-// @access  Public
+/* --------------------
+   POST /api/auth/login
+---------------------*/
 router.post(
   "/login",
   [
@@ -95,40 +90,28 @@ router.post(
     const { email, password } = req.body;
 
     try {
-      // Check if user exists
       const user = await User.findOne({ email }).select("+password");
       if (!user) {
-        return res.status(422).json({ message: "Invalid credentials" });
+        return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // Check if user is active
       if (!user.isActive) {
         return res.status(401).json({ message: "Account is deactivated" });
       }
 
-      // Check password
       const isMatch = await user.matchPassword(password);
       if (!isMatch) {
-        return res.status(422).json({ message: "Invalid credentials" });
+        return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // Generate tokens
       const token = generateToken(user._id);
       const refreshToken = generateRefreshToken(user._id);
 
-      // Set HttpOnly refresh token cookie (30 days)
-      res.cookie('refreshToken', refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production', // Only send over HTTPS in production
-        sameSite: 'lax', // Protect against CSRF
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
-        path: '/',
-        partitioned
-      });
+      res.cookie("refreshToken", refreshToken, refreshCookie);
 
-      res.json({
+      return res.json({
         success: true,
-        token, // Only return access token in body
+        token,
         user: {
           id: user._id,
           name: user.name,
@@ -139,21 +122,22 @@ router.post(
       });
     } catch (error) {
       console.error(error);
-      res.status(500).json({ message: "Server error" });
+      return res.status(500).json({ message: "Server error" });
     }
   }
 );
 
-// @route   GET /api/auth/me
-// @desc    Get current logged in user
-// @access  Private
+/* --------------------
+   GET /api/auth/me  (Private)
+---------------------*/
 router.get("/me", protect, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    res.json({
+
+    return res.json({
       success: true,
       user: {
         id: user._id,
@@ -167,81 +151,50 @@ router.get("/me", protect, async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 });
 
-// @route   POST /api/auth/refresh
-// @desc    Refresh access token using HttpOnly cookie
-// @access  Public
+/* --------------------
+   POST /api/auth/refresh
+---------------------*/
 router.post("/refresh", async (req, res) => {
   const refreshToken = req.cookies.refreshToken;
-
   if (!refreshToken) {
     return res.status(401).json({ message: "No refresh token provided" });
   }
 
   try {
-    // Verify refresh token
     const decoded = verifyRefreshToken(refreshToken);
-
-    // Get user from the token
     const user = await User.findById(decoded.id).select("-password");
-
-    if (!user) {
+    if (!user || !user.isActive) {
       return res.status(401).json({ message: "Invalid refresh token" });
     }
 
-    // Check if user is active
-    if (!user.isActive) {
-      return res.status(401).json({ message: "Account is deactivated" });
-    }
-
-    // Generate new tokens
     const newToken = generateToken(user._id);
     const newRefreshToken = generateRefreshToken(user._id);
 
-    // Rotate the refresh token cookie (set new one)
-    res.cookie('refreshToken', newRefreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'none',
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      path: '/',
-      partitioned: true,
-    });
+    // دوران التوكين
+    res.cookie("refreshToken", newRefreshToken, refreshCookie);
 
-    res.json({
-      success: true,
-      token: newToken,
-    });
+    return res.json({ success: true, token: newToken });
   } catch (error) {
     console.error(error);
-    res.status(401).json({ message: "Invalid refresh token" });
+    return res.status(401).json({ message: "Invalid refresh token" });
   }
 });
 
-// @route   POST /api/auth/logout
-// @desc    Logout user by clearing refresh token cookie
-// @access  Public
-router.post("/logout", async (req, res) => {
+/* --------------------
+   POST /api/auth/logout
+---------------------*/
+router.post("/logout", async (_req, res) => {
   try {
-    // Clear the refresh token cookie
-    res.clearCookie('refreshToken', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'none',
-      path: '/',
-      partitioned: true,
-    });
-
-    res.json({
-      success: true,
-      message: "Logged out successfully"
-    });
+    // مسح الكوكي بنفس الخصائص
+    res.clearCookie("refreshToken", refreshCookie);
+    return res.json({ success: true, message: "Logged out successfully" });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 });
 
