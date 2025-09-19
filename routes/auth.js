@@ -119,7 +119,7 @@ router.post(
       res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production', // Only send over HTTPS in production
-        sameSite: 'strict', // Protect against CSRF
+        sameSite: 'lax', // Protect against CSRF
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
         path: '/'
       });
