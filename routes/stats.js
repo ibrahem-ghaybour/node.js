@@ -157,7 +157,7 @@ router.get(
       }
 
       // Recent Sales: latest orders
-      const recentSales = await Order.find({ isActive: true })
+      const recentSales = await Order.find({ isActive: true, status: { $in: revenueStatuses } })
         .sort({ createdAt: -1 })
         .limit(limit)
         .populate("user", "name email")
@@ -174,12 +174,20 @@ router.get(
         success: true,
         range: { start, end },
         data: {
-          totalRevenue: pct(totalRevenue, totalRevenuePrev),
-          subscriptions: pct(subscriptions, subscriptionsPrev),
-          sales: pct(sales, salesPrev),
-          activeNow: pct(activeNow, activeNowPrev),
+          // Return current raw values for top-level metrics
+          totalRevenue,
+          subscriptions,
+          sales,
+          activeNow,
           overview: series,
           recentSales,
+          // Provide percentage change details separately for clarity
+          change: {
+            totalRevenue: pct(totalRevenue, totalRevenuePrev),
+            subscriptions: pct(subscriptions, subscriptionsPrev),
+            sales: pct(sales, salesPrev),
+            activeNow: pct(activeNow, activeNowPrev),
+          },
           current: {
             totalRevenue,
             subscriptions,
