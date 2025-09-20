@@ -155,6 +155,7 @@ router.post(
   "/checkout",
   [
     protect,
+    body("userId").optional().isMongoId().withMessage("Invalid userId"),
     body("shippingAddress").optional().isObject(),
     body("notes").optional().isLength({ max: 2000 }),
   ],
@@ -163,7 +164,12 @@ router.post(
     if (err) return;
     try {
       const { shippingAddress = {}, notes = "", currency = "USD" } = req.body;
-      const cart = await getOrCreateCart(req.user.id);
+
+      // Determine target user (admins/managers can act on behalf of others)
+      const isAdmin = req.user && ["admin", "manager"].includes(req.user.role);
+      const targetUserId = isAdmin && req.body.userId ? req.body.userId : req.user.id;
+
+      const cart = await getOrCreateCart(targetUserId);
       if (cart.items.length === 0) {
         return res.status(400).json({ success: false, error: "Cart is empty" });
       }
@@ -188,7 +194,7 @@ router.post(
       }
 
       const order = await Order.create({
-        user: req.user.id,
+        user: targetUserId,
         items: orderItems,
         totalAmount: total,
         currency,

@@ -24,6 +24,7 @@ router.post(
     body("items").optional().isArray({ min: 1 }).withMessage("Items must be a non-empty array when provided"),
     body("items.*.productId").optional().notEmpty().isMongoId().withMessage("Valid productId required"),
     body("items.*.quantity").optional().isInt({ min: 1 }).withMessage("Quantity must be >= 1"),
+    body("userId").optional().isMongoId().withMessage("Invalid userId"),
     body("addressId").optional().isMongoId().withMessage("Invalid addressId"),
     body("shippingAddress").optional().isObject(),
     body("notes").optional().isLength({ max: 2000 }),
@@ -34,9 +35,13 @@ router.post(
     try {
       let { shippingAddress = {}, notes = "", currency, addressId } = req.body;
 
+      // Determine target user (admins/managers can act on behalf of others)
+      const isAdmin = req.user && ["admin", "manager"].includes(req.user.role);
+      const targetUserId = isAdmin && req.body.userId ? req.body.userId : req.user.id;
+
       // If addressId is provided, resolve the address for this user and override shippingAddress
       if (addressId) {
-        const addr = await Address.findOne({ _id: addressId, user: req.user.id, isActive: true });
+        const addr = await Address.findOne({ _id: addressId, user: targetUserId, isActive: true });
         if (!addr) return res.status(404).json({ success: false, error: "Address not found" });
         shippingAddress = {
           fullName: addr.fullName,
@@ -54,7 +59,7 @@ router.post(
       let sourceItems = Array.isArray(req.body.items) ? req.body.items : null;
       let currencyFromCart = null;
       if (!sourceItems) {
-        const cart = await Cart.findOne({ user: req.user.id });
+        const cart = await Cart.findOne({ user: targetUserId });
         if (!cart || cart.items.length === 0) {
           return res.status(400).json({ success: false, error: "No items provided and cart is empty" });
         }
@@ -83,7 +88,7 @@ router.post(
       }
 
       const order = await Order.create({
-        user: req.user.id,
+        user: targetUserId,
         items: orderItems,
         totalAmount,
         currency: currency || currencyFromCart || "USD",
@@ -93,7 +98,7 @@ router.post(
 
       // If we used the cart, clear it after successful order creation
       if (!Array.isArray(req.body.items)) {
-        const cart = await Cart.findOne({ user: req.user.id });
+        const cart = await Cart.findOne({ user: targetUserId });
         if (cart) {
           cart.items = [];
           cart.totalAmount = 0;
