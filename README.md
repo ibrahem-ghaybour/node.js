@@ -1,3 +1,166 @@
+# Express MongoDB Backend - Project README
+
+This backend provides authentication, products, categories, locations, wishlist, and the following newly added features:
+
+- Cart: Users can add products, update quantities, remove items, clear cart, and checkout.
+- Orders: Create orders either from a provided items payload or directly from the user's cart (preferred). Orders clear the cart on success.
+- Addresses: Users can save multiple shipping addresses and pass an `addressId` while ordering.
+- Stats Dashboard: Admin/Manager can retrieve dashboard KPIs (Total Revenue, Subscriptions, Sales, Active Now, Overview, Recent Sales).
+
+## New Models
+
+- `models/Cart.js`
+- `models/Order.js` (enhanced)
+- `models/Address.js`
+
+## New/Updated Routes
+
+- Cart: `routes/cart.js`
+  - GET `/api/cart` – Get current user's cart
+  - POST `/api/cart/add` – Add product to cart (or increase quantity)
+  - PATCH `/api/cart/item/:productId` – Set item quantity (0 removes)
+  - DELETE `/api/cart/item/:productId` – Remove item
+  - DELETE `/api/cart` – Clear cart
+  - POST `/api/cart/checkout` – Create an order from the cart and clear it
+
+- Orders: `routes/orders.js`
+  - POST `/api/orders`
+    - Preferred: Call with no `items` body to auto-use the current user's cart.
+    - Optional: Supply `items` array manually.
+    - Optional: Provide `addressId` (must belong to the logged-in user) to set `shippingAddress`.
+    - Currency is taken from body if provided, else from cart currency, else defaults to `USD`.
+    - On success, if created from the cart, the cart is cleared.
+  - GET `/api/orders` – List orders (own for users; all for admin/manager)
+  - GET `/api/orders/:id` – Get one (owner or admin/manager)
+  - PATCH `/api/orders/:id/status` – Update status (admin/manager)
+  - POST `/api/orders/:id/cancel` – Cancel (owner; only if `pending`)
+
+- Addresses: `routes/addresses.js`
+  - GET `/api/addresses` – List user's addresses
+  - GET `/api/addresses/:id` – Get one (must be user's)
+  - POST `/api/addresses` – Create
+  - PUT `/api/addresses/:id` – Update
+  - DELETE `/api/addresses/:id` – Soft delete
+  - POST `/api/addresses/:id/default` – Set default address
+
+- Stats: `routes/stats.js`
+  - GET `/api/stats/dashboard?range=30d&limit=10` (admin/manager)
+    - totalRevenue: Sum of orders with status in [paid, shipped, delivered] within range
+    - subscriptions: Count of active users
+    - sales: Count of orders with status in [paid, shipped, delivered]
+    - activeNow: Users with status `active` and `isActive: true`
+    - overview: Daily series of revenue and orders
+    - recentSales: Latest N orders with user info
+
+## Server Wiring (server.js)
+
+Registered routes and advertised in root endpoint list:
+
+- `/api/cart`
+- `/api/orders`
+- `/api/addresses`
+- `/api/stats`
+- (Existing) `/api/auth`, `/api/users`, `/api/products`, `/api/categories`, `/api/governorates`, `/api/cities`, `/api/wishlist`
+
+## Authentication
+
+All protected endpoints require:
+
+```
+Authorization: Bearer <JWT>
+```
+
+## Usage Examples
+
+### Cart
+
+- Add to cart
+
+```
+POST /api/cart/add
+{
+  "productId": "<PRODUCT_ID>",
+  "quantity": 2
+}
+```
+
+- View cart: `GET /api/cart`
+
+- Update item quantity
+
+```
+PATCH /api/cart/item/<PRODUCT_ID>
+{
+  "quantity": 3
+}
+```
+
+- Clear cart: `DELETE /api/cart`
+
+- Checkout from cart: `POST /api/cart/checkout`
+
+### Orders
+
+- Create from cart (no items body)
+
+```
+POST /api/orders
+{
+  "addressId": "<ADDRESS_ID>",
+  "notes": "Leave at reception",
+  "currency": "USD"
+}
+```
+
+- Create with explicit items
+
+```
+POST /api/orders
+{
+  "items": [
+    { "productId": "<ID1>", "quantity": 2 },
+    { "productId": "<ID2>", "quantity": 1 }
+  ],
+  "addressId": "<ADDRESS_ID>",
+  "notes": "Evening delivery",
+  "currency": "USD"
+}
+```
+
+### Addresses
+
+- Create address
+
+```
+POST /api/addresses
+{
+  "fullName": "John Doe",
+  "phone": "+20123456789",
+  "line1": "123 Main St",
+  "line2": "",
+  "city": "Cairo",
+  "governorate": "Cairo",
+  "postalCode": "11511",
+  "country": "EG",
+  "isDefault": true
+}
+```
+
+### Stats (Admin/Manager)
+
+```
+GET /api/stats/dashboard?range=30d&limit=10
+```
+
+## Changelog (What was added)
+
+- Added Cart model and routes.
+- Enhanced Orders to create from Cart (and clear cart afterwards) and accept `addressId`.
+- Added Address model and routes (CRUD + default).
+- Added Stats dashboard endpoint for admin/manager.
+- Wired new routes into `server.js` and added to root endpoint listing.
+
+## Conversation Log (original content preserved below)
 # Cascade Chat Conversation
 
   Note: _This is purely the output of the chat conversation and does not contain any raw data, codebase snippets, etc. used to generate the output._

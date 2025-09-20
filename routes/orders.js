@@ -4,6 +4,7 @@ const { protect, authorize } = require("../middleware/auth");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 const Cart = require("../models/Cart");
+const Address = require("../models/Address");
 
 const router = express.Router();
 
@@ -23,6 +24,7 @@ router.post(
     body("items").optional().isArray({ min: 1 }).withMessage("Items must be a non-empty array when provided"),
     body("items.*.productId").optional().notEmpty().isMongoId().withMessage("Valid productId required"),
     body("items.*.quantity").optional().isInt({ min: 1 }).withMessage("Quantity must be >= 1"),
+    body("addressId").optional().isMongoId().withMessage("Invalid addressId"),
     body("shippingAddress").optional().isObject(),
     body("notes").optional().isLength({ max: 2000 }),
   ],
@@ -30,7 +32,23 @@ router.post(
     const err = handleValidation(req, res);
     if (err) return;
     try {
-      const { shippingAddress = {}, notes = "", currency } = req.body;
+      let { shippingAddress = {}, notes = "", currency, addressId } = req.body;
+
+      // If addressId is provided, resolve the address for this user and override shippingAddress
+      if (addressId) {
+        const addr = await Address.findOne({ _id: addressId, user: req.user.id, isActive: true });
+        if (!addr) return res.status(404).json({ success: false, error: "Address not found" });
+        shippingAddress = {
+          fullName: addr.fullName,
+          phone: addr.phone,
+          line1: addr.line1,
+          line2: addr.line2,
+          city: addr.city,
+          governorate: addr.governorate,
+          postalCode: addr.postalCode,
+          country: addr.country,
+        };
+      }
 
       // Decide source of items: request body (if provided) else user's cart
       let sourceItems = Array.isArray(req.body.items) ? req.body.items : null;
