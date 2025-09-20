@@ -17,6 +17,11 @@ const orderItemSchema = new mongoose.Schema(
 
 const orderSchema = new mongoose.Schema(
   {
+    orderCode: {
+      type: String,
+      unique: true,
+      index: true,
+    },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -52,4 +57,23 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Auto-generate sequential human-readable order codes like ORD-1002
+orderSchema.pre("save", async function (next) {
+  if (!this.isNew || this.orderCode) return next();
+  try {
+    const Counter = require("./Counter");
+    const c = await Counter.findOneAndUpdate(
+      { _id: "orderCode" },
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true }
+    );
+    // Format: ORD-<number> (no padding to match sample like ORD-1002)
+    this.orderCode = `ORD-${c.seq}`;
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = mongoose.model("Order", orderSchema);
+
