@@ -66,12 +66,15 @@ router.get(
     if (err) return;
     try {
       const { start, end } = parseRange(req.query.range);
+      const prevEnd = new Date(start);
+      const prevStart = new Date(start);
+      prevStart.setTime(start.getTime() - (end.getTime() - start.getTime()));
       const limit = parseInt(req.query.limit) || 10;
 
       // Definitions (sensible defaults)
       const revenueStatuses = ["paid", "shipped", "delivered"]; // count towards revenue & sales
 
-      // Total Revenue & Sales
+      // Total Revenue & Sales (current period)
       const revenueAgg = await Order.aggregate([
         {
           $match: {
@@ -91,11 +94,37 @@ router.get(
       const totalRevenue = revenueAgg[0]?.totalRevenue || 0;
       const sales = revenueAgg[0]?.salesCount || 0;
 
-      // Subscriptions: active users (can customize by role if needed)
-      const subscriptions = await User.countDocuments({ isActive: true });
+      // Total Revenue & Sales (previous equivalent period)
+      const revenueAggPrev = await Order.aggregate([
+        {
+          $match: {
+            isActive: true,
+            status: { $in: revenueStatuses },
+            createdAt: { $gte: prevStart, $lte: prevEnd },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: "$totalAmount" },
+            salesCount: { $sum: 1 },
+          },
+        },
+      ]);
+      const totalRevenuePrev = revenueAggPrev[0]?.totalRevenue || 0;
+      const salesPrev = revenueAggPrev[0]?.salesCount || 0;
 
-      // Active Now: users with status 'active' (heuristic without lastActive)
-      const activeNow = await User.countDocuments({ status: "active", isActive: true });
+      // Subscriptions: new users created within range (current and previous)
+      const [subscriptions, subscriptionsPrev] = await Promise.all([
+        User.countDocuments({ createdAt: { $gte: start, $lte: end } }),
+        User.countDocuments({ createdAt: { $gte: prevStart, $lte: prevEnd } }),
+      ]);
+
+      // Active Now: users with status 'active' updated within range (current and previous)
+      const [activeNow, activeNowPrev] = await Promise.all([
+        User.countDocuments({ status: "active", isActive: true, updatedAt: { $gte: start, $lte: end } }),
+        User.countDocuments({ status: "active", isActive: true, updatedAt: { $gte: prevStart, $lte: prevEnd } }),
+      ]);
 
       // Overview: revenue per day within range
       const overviewAgg = await Order.aggregate([
@@ -134,16 +163,35 @@ router.get(
         .populate("user", "name email")
         .select("totalAmount currency status createdAt user");
 
+      // Helper to compute percentage change vs previous period
+      const pct = (curr, prev) => {
+        if (prev === 0 && curr === 0) return 0;
+        if (prev === 0) return 100;
+        return ((curr - prev) / prev) * 100;
+      };
+
       res.json({
         success: true,
         range: { start, end },
         data: {
-          totalRevenue,
-          subscriptions,
-          sales,
-          activeNow,
+          totalRevenue: pct(totalRevenue, totalRevenuePrev),
+          subscriptions: pct(subscriptions, subscriptionsPrev),
+          sales: pct(sales, salesPrev),
+          activeNow: pct(activeNow, activeNowPrev),
           overview: series,
           recentSales,
+          current: {
+            totalRevenue,
+            subscriptions,
+            sales,
+            activeNow,
+          },
+          previous: {
+            totalRevenue: totalRevenuePrev,
+            subscriptions: subscriptionsPrev,
+            sales: salesPrev,
+            activeNow: activeNowPrev,
+          },
         },
       });
     } catch (e) {
