@@ -3,6 +3,7 @@ const { body, query, param, validationResult } = require("express-validator");
 const { protect, authorize } = require("../middleware/auth");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
+const Cart = require("../models/Cart");
 
 const router = express.Router();
 
@@ -18,9 +19,10 @@ router.post(
   "/",
   [
     protect,
-    body("items").isArray({ min: 1 }).withMessage("Items array is required"),
-    body("items.*.productId").notEmpty().isMongoId().withMessage("Valid productId required"),
-    body("items.*.quantity").isInt({ min: 1 }).withMessage("Quantity must be >= 1"),
+    // If client sends items, validate them; otherwise we'll fallback to cart.
+    body("items").optional().isArray({ min: 1 }).withMessage("Items must be a non-empty array when provided"),
+    body("items.*.productId").optional().notEmpty().isMongoId().withMessage("Valid productId required"),
+    body("items.*.quantity").optional().isInt({ min: 1 }).withMessage("Quantity must be >= 1"),
     body("shippingAddress").optional().isObject(),
     body("notes").optional().isLength({ max: 2000 }),
   ],
@@ -28,16 +30,29 @@ router.post(
     const err = handleValidation(req, res);
     if (err) return;
     try {
-      const { items, shippingAddress = {}, notes = "", currency = "USD" } = req.body;
+      const { shippingAddress = {}, notes = "", currency } = req.body;
 
-      // Fetch products and build order items
-      const productIds = items.map((i) => i.productId);
+      // Decide source of items: request body (if provided) else user's cart
+      let sourceItems = Array.isArray(req.body.items) ? req.body.items : null;
+      let currencyFromCart = null;
+      if (!sourceItems) {
+        const cart = await Cart.findOne({ user: req.user.id });
+        if (!cart || cart.items.length === 0) {
+          return res.status(400).json({ success: false, error: "No items provided and cart is empty" });
+        }
+        // Map cart format to { productId, quantity }
+        sourceItems = cart.items.map((ci) => ({ productId: ci.product.toString(), quantity: ci.quantity }));
+        currencyFromCart = cart.currency || null;
+      }
+
+      // Fetch products and build order items using current product data
+      const productIds = sourceItems.map((i) => i.productId);
       const products = await Product.find({ _id: { $in: productIds }, isActive: true });
       const map = new Map(products.map((p) => [p._id.toString(), p]));
 
       const orderItems = [];
       let totalAmount = 0;
-      for (const i of items) {
+      for (const i of sourceItems) {
         const p = map.get(i.productId);
         if (!p) {
           return res.status(400).json({ success: false, error: `Product not found or inactive: ${i.productId}` });
@@ -53,10 +68,20 @@ router.post(
         user: req.user.id,
         items: orderItems,
         totalAmount,
-        currency,
+        currency: currency || currencyFromCart || "USD",
         shippingAddress,
         notes,
       });
+
+      // If we used the cart, clear it after successful order creation
+      if (!Array.isArray(req.body.items)) {
+        const cart = await Cart.findOne({ user: req.user.id });
+        if (cart) {
+          cart.items = [];
+          cart.totalAmount = 0;
+          await cart.save();
+        }
+      }
 
       res.status(201).json({ success: true, data: order });
     } catch (e) {
