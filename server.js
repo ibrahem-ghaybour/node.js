@@ -62,6 +62,9 @@ app.use("/api/categories", require("./routes/categories"));
 app.use("/api/governorates", require("./routes/governorates"));
 app.use("/api/cities", require("./routes/cities"));
 app.use("/api/wishlist", require("./routes/wishlist"));
+app.use("/api/requests", require("./routes/requests"));
+app.use("/api/orders", require("./routes/orders"));
+app.use("/api/cart", require("./routes/cart"));
 
 app.get("/api/health", (req, res) => {
   res.json({
@@ -88,6 +91,9 @@ app.get("/", (req, res) => {
       governorates: "/api/governorates",
       cities: "/api/cities",
       wishlist: "/api/wishlist",
+      requests: "/api/requests",
+      orders: "/api/orders",
+      cart: "/api/cart",
     },
   });
 });
