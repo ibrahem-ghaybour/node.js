@@ -2,6 +2,8 @@ const express = require("express");
 const { body, param, validationResult } = require("express-validator");
 const { protect } = require("../middleware/auth");
 const Address = require("../models/Address");
+const City = require("../models/City");
+const Governorate = require("../models/Governorate");
 
 const router = express.Router();
 
@@ -50,8 +52,8 @@ router.post(
     body("phone").notEmpty().isLength({ max: 40 }),
     body("line1").notEmpty().isLength({ max: 200 }),
     body("line2").optional().isLength({ max: 200 }),
-    body("city").notEmpty().isLength({ max: 100 }),
-    body("governorate").notEmpty().isLength({ max: 100 }),
+    body("cityId").notEmpty().isMongoId().withMessage("Invalid cityId"),
+    body("governorateId").notEmpty().isMongoId().withMessage("Invalid governorateId"),
     body("postalCode").optional().isLength({ max: 20 }),
     body("country").notEmpty().isLength({ min: 2, max: 2 }),
     body("isDefault").optional().isBoolean(),
@@ -70,6 +72,24 @@ router.post(
           return res.status(400).json({ success: false, error: "fullName is required for guests" });
         }
       }
+
+      // Resolve governorate and city by IDs and validate relationship
+      const { governorateId, cityId } = req.body;
+      const gov = await Governorate.findOne({ _id: governorateId, isActive: true });
+      if (!gov) return res.status(404).json({ success: false, error: "Governorate not found" });
+      const city = await City.findOne({ _id: cityId, isActive: true }).populate("governorate", "_id");
+      if (!city) return res.status(404).json({ success: false, error: "City not found" });
+      if (city.governorate && city.governorate._id.toString() !== governorateId) {
+        return res.status(400).json({ success: false, error: "City does not belong to the specified governorate" });
+      }
+
+      // Store normalized names in Address schema (which expects strings)
+      payload.city = city.name;
+      payload.governorate = gov.name;
+      // Remove IDs that are not part of Address schema to avoid unintended persistence
+      delete payload.cityId;
+      delete payload.governorateId;
+
       const address = await Address.create(payload);
       // If isDefault true, unset others
       if (address.isDefault) {
@@ -93,8 +113,8 @@ router.put(
     body("phone").optional().isLength({ max: 40 }),
     body("line1").optional().isLength({ max: 200 }),
     body("line2").optional().isLength({ max: 200 }),
-    body("city").optional().isLength({ max: 100 }),
-    body("governorate").optional().isLength({ max: 100 }),
+    body("cityId").optional().isMongoId().withMessage("Invalid cityId"),
+    body("governorateId").optional().isMongoId().withMessage("Invalid governorateId"),
     body("postalCode").optional().isLength({ max: 20 }),
     body("country").optional().isLength({ min: 2, max: 2 }),
     body("isDefault").optional().isBoolean(),
@@ -105,7 +125,38 @@ router.put(
     try {
       const addr = await Address.findOne({ _id: req.params.id, user: req.user.id, isActive: true });
       if (!addr) return res.status(404).json({ success: false, error: "Address not found" });
-      Object.assign(addr, req.body);
+      const updates = { ...req.body };
+
+      // If user is authenticated, keep fullName aligned with account unless explicitly changing policy
+      if (req.user && req.user.name) {
+        updates.fullName = req.user.name;
+      }
+
+      // Handle optional city/governorate updates via IDs
+      const { governorateId, cityId } = updates;
+      if (governorateId || cityId) {
+        let gov = null;
+        let city = null;
+        if (governorateId) {
+          gov = await Governorate.findOne({ _id: governorateId, isActive: true });
+          if (!gov) return res.status(404).json({ success: false, error: "Governorate not found" });
+        }
+        if (cityId) {
+          city = await City.findOne({ _id: cityId, isActive: true }).populate("governorate", "_id");
+          if (!city) return res.status(404).json({ success: false, error: "City not found" });
+        }
+        // Validate relationship if both provided; if only one provided, attempt consistency check with existing values cannot be guaranteed
+        const govIdToCheck = governorateId || undefined;
+        if (city && city.governorate && govIdToCheck && city.governorate._id.toString() !== govIdToCheck) {
+          return res.status(400).json({ success: false, error: "City does not belong to the specified governorate" });
+        }
+        if (city) updates.city = city.name;
+        if (gov) updates.governorate = gov.name;
+        delete updates.cityId;
+        delete updates.governorateId;
+      }
+
+      Object.assign(addr, updates);
       await addr.save();
       if (addr.isDefault) {
         await Address.updateMany({ user: req.user.id, _id: { $ne: addr._id } }, { $set: { isDefault: false } });
