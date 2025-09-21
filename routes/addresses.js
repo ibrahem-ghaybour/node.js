@@ -46,7 +46,7 @@ router.post(
   "/",
   [
     protect,
-    body("fullName").notEmpty().isLength({ max: 120 }),
+    body("fullName").optional().isLength({ max: 120 }),
     body("phone").notEmpty().isLength({ max: 40 }),
     body("line1").notEmpty().isLength({ max: 200 }),
     body("line2").optional().isLength({ max: 200 }),
@@ -61,6 +61,15 @@ router.post(
     if (err) return;
     try {
       const payload = { ...req.body, user: req.user.id };
+      // For authenticated users, always take the name from the account
+      if (req.user && req.user.name) {
+        payload.fullName = req.user.name;
+      } else {
+        // Fallback in case of optional/guest flows: require fullName when no authenticated user
+        if (!payload.fullName) {
+          return res.status(400).json({ success: false, error: "fullName is required for guests" });
+        }
+      }
       const address = await Address.create(payload);
       // If isDefault true, unset others
       if (address.isDefault) {
