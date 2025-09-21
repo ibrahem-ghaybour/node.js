@@ -32,6 +32,9 @@ router.post(
       "password",
       "Please enter a password with 6 or more characters"
     ).isLength({ min: 6 }),
+    body("phone").optional().isLength({ max: 40 }),
+    body("gender").optional().isIn(["male", "female"]).withMessage("gender must be 'male' or 'female'"),
+    body("birthdate").optional().isISO8601().withMessage("birthdate must be a valid date"),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -39,7 +42,7 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { name, email, password } = req.body;
+    const { name, email, password, phone = "", gender, birthdate } = req.body;
 
     try {
       let user = await User.findOne({ email });
@@ -47,7 +50,7 @@ router.post(
         return res.status(400).json({ message: "User already exists" });
       }
 
-      user = new User({ name, email, password });
+      user = new User({ name, email, password, phone, gender, birthdate });
       await user.save();
 
       const token = generateToken(user._id);
@@ -63,6 +66,9 @@ router.post(
           name: user.name,
           email: user.email,
           role: user.role,
+          phone: user.phone,
+          gender: user.gender,
+          birthdate: user.birthdate,
         },
       });
     } catch (error) {
@@ -118,6 +124,9 @@ router.post(
           email: user.email,
           role: user.role,
           avatar: user.avatar,
+          phone: user.phone,
+          gender: user.gender,
+          birthdate: user.birthdate,
         },
       });
     } catch (error) {
@@ -145,6 +154,9 @@ router.get("/me", protect, async (req, res) => {
         email: user.email,
         role: user.role,
         avatar: user.avatar,
+        phone: user.phone,
+        gender: user.gender,
+        birthdate: user.birthdate,
         isActive: user.isActive,
         createdAt: user.createdAt,
       },

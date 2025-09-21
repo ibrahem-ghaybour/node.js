@@ -25,6 +25,21 @@ const userSchema = new mongoose.Schema(
       minlength: [6, "Password must be at least 6 characters"],
       select: false,
     },
+    phone: {
+      type: String,
+      trim: true,
+      maxlength: [40, "Phone cannot exceed 40 characters"],
+      default: "",
+    },
+    gender: {
+      type: String,
+      enum: ["male", "female"],
+      default: undefined,
+    },
+    birthdate: {
+      type: Date,
+      default: undefined,
+    },
     role: {
       type: String,
       enum: ["user", "customer", "manager", "admin"],
