@@ -21,9 +21,20 @@ router.post(
   [
     protect,
     // If client sends items, validate them; otherwise we'll fallback to cart.
-    body("items").optional().isArray({ min: 1 }).withMessage("Items must be a non-empty array when provided"),
-    body("items.*.productId").optional().notEmpty().isMongoId().withMessage("Valid productId required"),
-    body("items.*.quantity").optional().isInt({ min: 1 }).withMessage("Quantity must be >= 1"),
+    body("items")
+      .optional()
+      .isArray({ min: 1 })
+      .withMessage("Items must be a non-empty array when provided"),
+    body("items.*.productId")
+      .optional()
+      .notEmpty()
+      .isMongoId()
+      .withMessage("Valid productId required"),
+    body("items.*.quantity")
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage("Quantity must be >= 1")
+      .toInt(),
     body("userId").optional().isMongoId().withMessage("Invalid userId"),
     body("addressId").optional().isMongoId().withMessage("Invalid addressId"),
     body("notes").optional().isLength({ max: 2000 }),
@@ -36,16 +47,29 @@ router.post(
 
       // Determine target user (admins/managers can act on behalf of others)
       const isAdmin = req.user && ["admin", "manager"].includes(req.user.role);
-      const targetUserId = isAdmin && req.body.userId ? req.body.userId : req.user.id;
+      const targetUserId =
+        isAdmin && req.body.userId ? req.body.userId : req.user.id;
 
       // Enforce: authenticated users must provide addressId; we do NOT accept shippingAddress objects for logged-in users
       if (!addressId) {
-        return res.status(400).json({ success: false, error: "addressId is required for authenticated users" });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: "addressId is required for authenticated users",
+          });
       }
 
       // Resolve the address for this user and construct shippingAddress
-      const addr = await Address.findOne({ _id: addressId, user: targetUserId, isActive: true });
-      if (!addr) return res.status(404).json({ success: false, error: "Address not found" });
+      const addr = await Address.findOne({
+        _id: addressId,
+        user: targetUserId,
+        isActive: true,
+      });
+      if (!addr)
+        return res
+          .status(404)
+          .json({ success: false, error: "Address not found" });
       const shippingAddress = {
         fullName: addr.fullName,
         phone: addr.phone,
@@ -63,16 +87,27 @@ router.post(
       if (!sourceItems) {
         const cart = await Cart.findOne({ user: targetUserId });
         if (!cart || cart.items.length === 0) {
-          return res.status(400).json({ success: false, error: "No items provided and cart is empty" });
+          return res
+            .status(400)
+            .json({
+              success: false,
+              error: "No items provided and cart is empty",
+            });
         }
         // Map cart format to { productId, quantity }
-        sourceItems = cart.items.map((ci) => ({ productId: ci.product.toString(), quantity: ci.quantity }));
+        sourceItems = cart.items.map((ci) => ({
+          productId: ci.product.toString(),
+          quantity: ci.quantity,
+        }));
         currencyFromCart = cart.currency || null;
       }
 
       // Fetch products and build order items using current product data
       const productIds = sourceItems.map((i) => i.productId);
-      const products = await Product.find({ _id: { $in: productIds }, isActive: true });
+      const products = await Product.find({
+        _id: { $in: productIds },
+        isActive: true,
+      });
       const map = new Map(products.map((p) => [p._id.toString(), p]));
 
       const orderItems = [];
@@ -80,13 +115,26 @@ router.post(
       for (const i of sourceItems) {
         const p = map.get(i.productId);
         if (!p) {
-          return res.status(400).json({ success: false, error: `Product not found or inactive: ${i.productId}` });
+          return res
+            .status(400)
+            .json({
+              success: false,
+              error: `Product not found or inactive: ${i.productId}`,
+            });
         }
         const price = p.price;
-        const quantity = i.quantity;
+        const quantity = Number.isInteger(i.quantity)
+          ? i.quantity
+          : Number.parseInt(i.quantity, 10);
         const subtotal = price * quantity;
         totalAmount += subtotal;
-        orderItems.push({ product: p._id, name: p.name, price, quantity, subtotal });
+        orderItems.push({
+          product: p._id,
+          name: p.name,
+          price,
+          quantity,
+          subtotal,
+        });
       }
 
       const order = await Order.create({
@@ -123,8 +171,12 @@ router.get(
     protect,
     query("page").optional().isInt({ min: 1 }),
     query("limit").optional().isInt({ min: 1, max: 100 }),
-    query("status").optional().isIn(["pending", "paid", "shipped", "delivered", "cancelled"]),
-    query("sortBy").optional().isIn(["createdAt", "updatedAt", "totalAmount", "status"]),
+    query("status")
+      .optional()
+      .isIn(["pending", "paid", "shipped", "delivered", "cancelled"]),
+    query("sortBy")
+      .optional()
+      .isIn(["createdAt", "updatedAt", "totalAmount", "status"]),
     query("sortOrder").optional().isIn(["asc", "desc"]),
   ],
   async (req, res) => {
@@ -171,32 +223,41 @@ router.get(
 );
 
 // Get single order (owner or admin/manager)
-router.get(
-  "/:id",
-  [protect, param("id").isMongoId()],
-  async (req, res) => {
-    const err = handleValidation(req, res);
-    if (err) return;
-    try {
-      const order = await Order.findById(req.params.id)
-        .populate("user", "name email role")
-        .populate("items.product", "name price");
-      if (!order || !order.isActive) return res.status(404).json({ success: false, error: "Not found" });
-      const isOwner = order.user._id.toString() === req.user.id;
-      const isAdmin = ["admin", "manager"].includes(req.user.role);
-      if (!isOwner && !isAdmin) return res.status(403).json({ success: false, error: "Forbidden" });
-      res.json({ success: true, data: order });
-    } catch (e) {
-      console.error("Error fetching order:", e);
-      res.status(500).json({ success: false, error: "Server error" });
-    }
+router.get("/:id", [protect, param("id").isMongoId()], async (req, res) => {
+  const err = handleValidation(req, res);
+  if (err) return;
+  try {
+    const order = await Order.findById(req.params.id)
+      .populate("user", "name email role")
+      .populate("items.product", "name price");
+    if (!order || !order.isActive)
+      return res.status(404).json({ success: false, error: "Not found" });
+    const isOwner = order.user._id.toString() === req.user.id;
+    const isAdmin = ["admin", "manager"].includes(req.user.role);
+    if (!isOwner && !isAdmin)
+      return res.status(403).json({ success: false, error: "Forbidden" });
+    res.json({ success: true, data: order });
+  } catch (e) {
+    console.error("Error fetching order:", e);
+    res.status(500).json({ success: false, error: "Server error" });
   }
-);
+});
 
 // Update order status (admin/manager)
 router.patch(
   "/:id/status",
-  [protect, authorize("admin", "manager"), param("id").isMongoId(), body("status").isIn(["pending", "paid", "shipped", "delivered", "cancelled"])],
+  [
+    protect,
+    authorize("admin", "manager"),
+    param("id").isMongoId(),
+    body("status").isIn([
+      "pending",
+      "paid",
+      "shipped",
+      "delivered",
+      "cancelled",
+    ]),
+  ],
   async (req, res) => {
     const err = handleValidation(req, res);
     if (err) return;
@@ -208,7 +269,8 @@ router.patch(
       )
         .populate("user", "name email role")
         .populate("items.product", "name price");
-      if (!order) return res.status(404).json({ success: false, error: "Not found" });
+      if (!order)
+        return res.status(404).json({ success: false, error: "Not found" });
       res.json({ success: true, data: order });
     } catch (e) {
       console.error("Error updating status:", e);
@@ -223,9 +285,15 @@ router.patch(
   [
     protect,
     authorize("admin", "manager"),
-    body("orderIds").isArray({ min: 1 }).withMessage("orderIds must be a non-empty array"),
-    body("orderIds.*").isString().withMessage("Each order identifier must be a string"),
-    body("status").isIn(["pending", "paid", "shipped", "delivered", "cancelled"]).withMessage("Invalid status"),
+    body("orderIds")
+      .isArray({ min: 1 })
+      .withMessage("orderIds must be a non-empty array"),
+    body("orderIds.*")
+      .isString()
+      .withMessage("Each order identifier must be a string"),
+    body("status")
+      .isIn(["pending", "paid", "shipped", "delivered", "cancelled"])
+      .withMessage("Invalid status"),
   ],
   async (req, res) => {
     const err = handleValidation(req, res);
@@ -240,16 +308,26 @@ router.patch(
 
       const filter = { $or: [] };
       if (mongoIds.length) filter.$or.push({ _id: { $in: mongoIds } });
-      if (orderCodes.length) filter.$or.push({ orderCode: { $in: orderCodes } });
+      if (orderCodes.length)
+        filter.$or.push({ orderCode: { $in: orderCodes } });
 
       if (filter.$or.length === 0) {
-        return res.status(400).json({ success: false, error: "No valid order identifiers provided" });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: "No valid order identifiers provided",
+          });
       }
 
       // Find matching orders first to report which were found vs not
-      const foundOrders = await Order.find(filter).select("_id orderCode status");
+      const foundOrders = await Order.find(filter).select(
+        "_id orderCode status"
+      );
       if (!foundOrders.length) {
-        return res.status(404).json({ success: false, error: "No matching orders found" });
+        return res
+          .status(404)
+          .json({ success: false, error: "No matching orders found" });
       }
 
       const idsToUpdate = foundOrders.map((o) => o._id);
@@ -293,9 +371,17 @@ router.post(
     if (err) return;
     try {
       const order = await Order.findById(req.params.id);
-      if (!order || !order.isActive) return res.status(404).json({ success: false, error: "Not found" });
-      if (order.user.toString() !== req.user.id) return res.status(403).json({ success: false, error: "Forbidden" });
-      if (order.status !== "pending") return res.status(400).json({ success: false, error: "Only pending orders can be cancelled" });
+      if (!order || !order.isActive)
+        return res.status(404).json({ success: false, error: "Not found" });
+      if (order.user.toString() !== req.user.id)
+        return res.status(403).json({ success: false, error: "Forbidden" });
+      if (order.status !== "pending")
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: "Only pending orders can be cancelled",
+          });
       order.status = "cancelled";
       await order.save();
       res.json({ success: true, data: order });

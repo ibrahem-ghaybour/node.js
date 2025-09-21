@@ -49,27 +49,32 @@ router.post(
   [
     protect,
     body("productId").isMongoId().withMessage("Valid productId required"),
-    body("quantity").optional().isInt({ min: 1 }).withMessage("Quantity must be >= 1"),
+    body("quantity")
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage("Quantity must be >= 1")
+      .toInt(),
   ],
   async (req, res) => {
     const err = handleValidation(req, res);
     if (err) return;
     try {
-      const { productId, quantity = 1 } = req.body;
+      const { productId } = req.body;
+      const qty = Number.isInteger(req.body.quantity) ? req.body.quantity : Number.parseInt(req.body.quantity ?? 1, 10);
       const product = await Product.findOne({ _id: productId, isActive: true });
       if (!product) return res.status(400).json({ success: false, error: "Product not found or inactive" });
 
       const cart = await getOrCreateCart(req.user.id);
       const idx = cart.items.findIndex((i) => i.product.toString() === productId);
       if (idx >= 0) {
-        cart.items[idx].quantity += quantity;
+        cart.items[idx].quantity += qty;
       } else {
         cart.items.push({
           product: product._id,
           name: product.name,
           price: product.price,
-          quantity,
-          subtotal: product.price * quantity,
+          quantity: qty,
+          subtotal: product.price * qty,
         });
       }
       recalcCart(cart);
@@ -86,20 +91,25 @@ router.post(
 // Update item quantity (set absolute quantity; if 0, remove)
 router.patch(
   "/item/:productId",
-  [protect, param("productId").isMongoId(), body("quantity").isInt({ min: 0 })],
+  [
+    protect,
+    param("productId").isMongoId(),
+    body("quantity").isInt({ min: 0 }).toInt(),
+  ],
   async (req, res) => {
     const err = handleValidation(req, res);
     if (err) return;
     try {
       const { productId } = req.params;
       const { quantity } = req.body;
+      const qty = Number.isInteger(quantity) ? quantity : Number.parseInt(quantity, 10);
       const cart = await getOrCreateCart(req.user.id);
       const idx = cart.items.findIndex((i) => i.product.toString() === productId);
       if (idx === -1) return res.status(404).json({ success: false, error: "Item not found in cart" });
-      if (quantity === 0) {
+      if (qty === 0) {
         cart.items.splice(idx, 1);
       } else {
-        cart.items[idx].quantity = quantity;
+        cart.items[idx].quantity = qty;
       }
       recalcCart(cart);
       await cart.save();
