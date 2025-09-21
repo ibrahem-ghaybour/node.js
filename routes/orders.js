@@ -26,34 +26,36 @@ router.post(
     body("items.*.quantity").optional().isInt({ min: 1 }).withMessage("Quantity must be >= 1"),
     body("userId").optional().isMongoId().withMessage("Invalid userId"),
     body("addressId").optional().isMongoId().withMessage("Invalid addressId"),
-    body("shippingAddress").optional().isObject(),
     body("notes").optional().isLength({ max: 2000 }),
   ],
   async (req, res) => {
     const err = handleValidation(req, res);
     if (err) return;
     try {
-      let { shippingAddress = {}, notes = "", currency, addressId } = req.body;
+      let { notes = "", currency, addressId } = req.body;
 
       // Determine target user (admins/managers can act on behalf of others)
       const isAdmin = req.user && ["admin", "manager"].includes(req.user.role);
       const targetUserId = isAdmin && req.body.userId ? req.body.userId : req.user.id;
 
-      // If addressId is provided, resolve the address for this user and override shippingAddress
-      if (addressId) {
-        const addr = await Address.findOne({ _id: addressId, user: targetUserId, isActive: true });
-        if (!addr) return res.status(404).json({ success: false, error: "Address not found" });
-        shippingAddress = {
-          fullName: addr.fullName,
-          phone: addr.phone,
-          line1: addr.line1,
-          line2: addr.line2,
-          city: addr.city,
-          governorate: addr.governorate,
-          postalCode: addr.postalCode,
-          country: addr.country,
-        };
+      // Enforce: authenticated users must provide addressId; we do NOT accept shippingAddress objects for logged-in users
+      if (!addressId) {
+        return res.status(400).json({ success: false, error: "addressId is required for authenticated users" });
       }
+
+      // Resolve the address for this user and construct shippingAddress
+      const addr = await Address.findOne({ _id: addressId, user: targetUserId, isActive: true });
+      if (!addr) return res.status(404).json({ success: false, error: "Address not found" });
+      const shippingAddress = {
+        fullName: addr.fullName,
+        phone: addr.phone,
+        line1: addr.line1,
+        line2: addr.line2,
+        city: addr.city,
+        governorate: addr.governorate,
+        postalCode: addr.postalCode,
+        country: addr.country,
+      };
 
       // Decide source of items: request body (if provided) else user's cart
       let sourceItems = Array.isArray(req.body.items) ? req.body.items : null;
