@@ -67,6 +67,7 @@ app.use("/api/orders", require("./routes/orders"));
 app.use("/api/cart", require("./routes/cart"));
 app.use("/api/stats", require("./routes/stats"));
 app.use("/api/addresses", require("./routes/addresses"));
+app.use("/api/settings", require("./routes/settings"));
 
 app.get("/api/health", (req, res) => {
   res.json({
@@ -98,6 +99,7 @@ app.get("/", (req, res) => {
       cart: "/api/cart",
       stats: "/api/stats",
       addresses: "/api/addresses",
+      settings: "/api/settings",
     },
   });
 });

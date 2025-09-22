@@ -4,6 +4,7 @@ const { protect } = require("../middleware/auth");
 const Cart = require("../models/Cart");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
+const { getCurrency } = require("../utils/settings");
 
 const router = express.Router();
 
@@ -17,7 +18,19 @@ const handleValidation = (req, res) => {
 async function getOrCreateCart(userId) {
   let cart = await Cart.findOne({ user: userId });
   if (!cart) {
-    cart = await Cart.create({ user: userId, items: [], totalAmount: 0 });
+    const currency = await getCurrency();
+    cart = await Cart.create({ user: userId, items: [], totalAmount: 0, currency });
+    return cart;
+  }
+  // keep currency in sync with global setting
+  try {
+    const currency = await getCurrency();
+    if (!cart.currency || cart.currency !== currency) {
+      cart.currency = currency;
+      await cart.save();
+    }
+  } catch (e) {
+    // non-fatal; proceed with existing cart currency
   }
   return cart;
 }
@@ -173,7 +186,7 @@ router.post(
     const err = handleValidation(req, res);
     if (err) return;
     try {
-      const { shippingAddress = {}, notes = "", currency = "USD" } = req.body;
+      const { shippingAddress = {}, notes = "" } = req.body;
 
       // Determine target user (admins/managers can act on behalf of others)
       const isAdmin = req.user && ["admin", "manager"].includes(req.user.role);
@@ -203,11 +216,12 @@ router.post(
         orderItems.push({ product: p._id, name: p.name, price, quantity, subtotal });
       }
 
+      const currencyValue = await getCurrency();
       const order = await Order.create({
         user: targetUserId,
         items: orderItems,
         totalAmount: total,
-        currency,
+        currency: currencyValue,
         shippingAddress,
         notes,
       });

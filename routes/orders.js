@@ -6,6 +6,7 @@ const Product = require("../models/Product");
 const Cart = require("../models/Cart");
 const Address = require("../models/Address");
 const User = require("../models/User");
+const { getCurrency } = require("../utils/settings");
 
 const router = express.Router();
 
@@ -44,7 +45,7 @@ router.post(
     const err = handleValidation(req, res);
     if (err) return;
     try {
-      let { notes = "", currency, addressId } = req.body;
+      let { notes = "", addressId } = req.body;
 
       // Determine target user (admins/managers can act on behalf of others)
       const isAdmin = req.user && ["admin", "manager"].includes(req.user.role);
@@ -82,7 +83,6 @@ router.post(
 
       // Decide source of items: request body (if provided) else user's cart
       let sourceItems = Array.isArray(req.body.items) ? req.body.items : null;
-      let currencyFromCart = null;
       if (!sourceItems) {
         const cart = await Cart.findOne({ user: targetUserId });
         if (!cart || cart.items.length === 0) {
@@ -96,7 +96,6 @@ router.post(
           productId: ci.product.toString(),
           quantity: ci.quantity,
         }));
-        currencyFromCart = cart.currency || null;
       }
 
       // Fetch products and build order items using current product data
@@ -132,11 +131,12 @@ router.post(
         });
       }
 
+      const currencyValue = await getCurrency();
       const order = await Order.create({
         user: targetUserId,
         items: orderItems,
         totalAmount,
-        currency: currency || currencyFromCart || "USD",
+        currency: currencyValue,
         shippingAddress,
         notes,
       });
@@ -187,20 +187,13 @@ router.post(
     body("guest").isObject().withMessage("guest info is required"),
     body("guest.name").trim().notEmpty(),
     body("guest.email").isEmail().normalizeEmail(),
-    body("currency").optional().isString(),
     body("notes").optional().isLength({ max: 2000 }),
   ],
   async (req, res) => {
     const err = handleValidation(req, res);
     if (err) return;
     try {
-      const {
-        items,
-        shippingAddress,
-        guest,
-        currency = "USD",
-        notes = "",
-      } = req.body;
+      const { items, shippingAddress, guest, notes = "" } = req.body;
 
       // Ensure products exist and are active; build order items with current price
       const productIds = items.map((i) => i.productId);
@@ -250,11 +243,12 @@ router.post(
         await userDoc.save();
       }
 
+      const currencyValue = await getCurrency();
       const order = await Order.create({
         user: userDoc._id,
         items: orderItems,
         totalAmount,
-        currency,
+        currency: currencyValue,
         shippingAddress: {
           fullName: shippingAddress.fullName,
           phone: shippingAddress.phone,
