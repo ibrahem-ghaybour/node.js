@@ -5,6 +5,7 @@ const Order = require("../models/Order");
 const Product = require("../models/Product");
 const Cart = require("../models/Cart");
 const Address = require("../models/Address");
+const User = require("../models/User");
 
 const router = express.Router();
 
@@ -52,12 +53,10 @@ router.post(
 
       // Enforce: authenticated users must provide addressId; we do NOT accept shippingAddress objects for logged-in users
       if (!addressId) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: "addressId is required for authenticated users",
-          });
+        return res.status(400).json({
+          success: false,
+          error: "addressId is required for authenticated users",
+        });
       }
 
       // Resolve the address for this user and construct shippingAddress
@@ -87,12 +86,10 @@ router.post(
       if (!sourceItems) {
         const cart = await Cart.findOne({ user: targetUserId });
         if (!cart || cart.items.length === 0) {
-          return res
-            .status(400)
-            .json({
-              success: false,
-              error: "No items provided and cart is empty",
-            });
+          return res.status(400).json({
+            success: false,
+            error: "No items provided and cart is empty",
+          });
         }
         // Map cart format to { productId, quantity }
         sourceItems = cart.items.map((ci) => ({
@@ -115,12 +112,10 @@ router.post(
       for (const i of sourceItems) {
         const p = map.get(i.productId);
         if (!p) {
-          return res
-            .status(400)
-            .json({
-              success: false,
-              error: `Product not found or inactive: ${i.productId}`,
-            });
+          return res.status(400).json({
+            success: false,
+            error: `Product not found or inactive: ${i.productId}`,
+          });
         }
         const price = p.price;
         const quantity = Number.isInteger(i.quantity)
@@ -159,6 +154,123 @@ router.post(
       res.status(201).json({ success: true, data: order });
     } catch (e) {
       console.error("Error creating order:", e);
+      res.status(500).json({ success: false, error: "Server error" });
+    }
+  }
+);
+
+// Guest checkout (no authentication required)
+router.post(
+  "/guest",
+  [
+    body("items")
+      .isArray({ min: 1 })
+      .withMessage("Items must be a non-empty array"),
+    body("items.*.productId")
+      .isMongoId()
+      .withMessage("Valid productId required"),
+    body("items.*.quantity")
+      .isInt({ min: 1 })
+      .withMessage("Quantity must be >= 1")
+      .toInt(),
+    body("shippingAddress")
+      .isObject()
+      .withMessage("shippingAddress is required"),
+    body("shippingAddress.fullName").trim().notEmpty(),
+    body("shippingAddress.phone").trim().notEmpty(),
+    body("shippingAddress.line1").trim().notEmpty(),
+    body("shippingAddress.city").trim().notEmpty(),
+    body("shippingAddress.governorate").trim().notEmpty(),
+    body("shippingAddress.country").isLength({ min: 2, max: 2 }),
+    body("shippingAddress.line2").optional().isString(),
+    body("shippingAddress.postalCode").optional().isString(),
+    body("guest").isObject().withMessage("guest info is required"),
+    body("guest.name").trim().notEmpty(),
+    body("guest.email").isEmail().normalizeEmail(),
+    body("currency").optional().isString(),
+    body("notes").optional().isLength({ max: 2000 }),
+  ],
+  async (req, res) => {
+    const err = handleValidation(req, res);
+    if (err) return;
+    try {
+      const {
+        items,
+        shippingAddress,
+        guest,
+        currency = "USD",
+        notes = "",
+      } = req.body;
+
+      // Ensure products exist and are active; build order items with current price
+      const productIds = items.map((i) => i.productId);
+      const products = await Product.find({
+        _id: { $in: productIds },
+        isActive: true,
+      });
+      const pmap = new Map(products.map((p) => [p._id.toString(), p]));
+
+      const orderItems = [];
+      let totalAmount = 0;
+      for (const i of items) {
+        const p = pmap.get(i.productId);
+        if (!p) {
+          return res.status(400).json({
+            success: false,
+            error: `Product not found or inactive: ${i.productId}`,
+          });
+        }
+        const quantity = Number.isInteger(i.quantity)
+          ? i.quantity
+          : Number.parseInt(i.quantity, 10);
+        const price = p.price;
+        const subtotal = price * quantity;
+        totalAmount += subtotal;
+        orderItems.push({
+          product: p._id,
+          name: p.name,
+          price,
+          quantity,
+          subtotal,
+        });
+      }
+
+      // Create or reuse a user for the guest email
+      let userDoc = await User.findOne({ email: guest.email });
+      if (!userDoc) {
+        const randomPass = Math.random().toString(36).slice(2) + Date.now();
+        userDoc = new User({
+          name: guest.name,
+          email: guest.email,
+          password: randomPass,
+          role: "customer",
+          status: "active",
+          isActive: true,
+        });
+        await userDoc.save();
+      }
+
+      const order = await Order.create({
+        user: userDoc._id,
+        items: orderItems,
+        totalAmount,
+        currency,
+        shippingAddress: {
+          fullName: shippingAddress.fullName,
+          phone: shippingAddress.phone,
+          line1: shippingAddress.line1,
+          line2: shippingAddress.line2 || "",
+          city: shippingAddress.city,
+          governorate: shippingAddress.governorate,
+          postalCode: shippingAddress.postalCode || "",
+          country: shippingAddress.country,
+        },
+        notes,
+      });
+
+      res.status(201).json({ success: true, data: order });
+    } catch (e) {
+      console.error("Error creating guest order:", e);
       res.status(500).json({ success: false, error: "Server error" });
     }
   }
@@ -312,12 +424,10 @@ router.patch(
         filter.$or.push({ orderCode: { $in: orderCodes } });
 
       if (filter.$or.length === 0) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: "No valid order identifiers provided",
-          });
+        return res.status(400).json({
+          success: false,
+          error: "No valid order identifiers provided",
+        });
       }
 
       // Find matching orders first to report which were found vs not
@@ -376,12 +486,10 @@ router.post(
       if (order.user.toString() !== req.user.id)
         return res.status(403).json({ success: false, error: "Forbidden" });
       if (order.status !== "pending")
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: "Only pending orders can be cancelled",
-          });
+        return res.status(400).json({
+          success: false,
+          error: "Only pending orders can be cancelled",
+        });
       order.status = "cancelled";
       await order.save();
       res.json({ success: true, data: order });
