@@ -270,19 +270,24 @@ router.post(
   }
 );
 
-// List current user's orders; admins see all
+// Search orders with comprehensive search functionality
 router.get(
   "/",
   [
     protect,
-    query("page").optional().isInt({ min: 1 }),
-    query("limit").optional().isInt({ min: 1, max: 100 }),
+    query("q").optional().isString().withMessage("Search query must be a string"),
+    query("page").optional().isInt({ min: 1 }).toInt(),
+    query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
     query("status")
       .optional()
       .isIn(["pending", "paid", "shipped", "delivered", "cancelled"]),
+    query("minAmount").optional().isNumeric().toFloat(),
+    query("maxAmount").optional().isNumeric().toFloat(),
+    query("startDate").optional().isISO8601().toDate(),
+    query("endDate").optional().isISO8601().toDate(),
     query("sortBy")
       .optional()
-      .isIn(["createdAt", "updatedAt", "totalAmount", "status"]),
+      .isIn(["createdAt", "updatedAt", "totalAmount", "status", "orderCode"]),
     query("sortOrder").optional().isIn(["asc", "desc"]),
   ],
   async (req, res) => {
@@ -292,11 +297,52 @@ router.get(
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 10;
       const skip = (page - 1) * limit;
+
       const filter = { isActive: true };
+
+      // User access control
       if (!req.user || !["admin", "manager"].includes(req.user.role)) {
         filter.user = req.user.id;
       }
+
+      // Apply existing filters
       if (req.query.status) filter.status = req.query.status;
+      if (req.query.minAmount) filter.totalAmount = { ...filter.totalAmount, $gte: req.query.minAmount };
+      if (req.query.maxAmount) filter.totalAmount = { ...filter.totalAmount, $lte: req.query.maxAmount };
+      if (req.query.startDate || req.query.endDate) {
+        filter.createdAt = {};
+        if (req.query.startDate) filter.createdAt.$gte = req.query.startDate;
+        if (req.query.endDate) filter.createdAt.$lte = req.query.endDate;
+      }
+
+      // Build search conditions
+      if (req.query.q) {
+        const searchRegex = new RegExp(req.query.q, 'i');
+        const searchConditions = [
+          { orderCode: searchRegex },
+          { 'items.name': searchRegex },
+          { notes: searchRegex },
+          { 'shippingAddress.fullName': searchRegex },
+          { 'shippingAddress.phone': searchRegex },
+          { 'shippingAddress.city': searchRegex },
+          { 'shippingAddress.governorate': searchRegex },
+        ];
+
+        // For admin/manager, also search in user name and email
+        if (req.user && ["admin", "manager"].includes(req.user.role)) {
+          const users = await User.find({
+            $or: [
+              { name: searchRegex },
+              { email: searchRegex }
+            ]
+          }).select('_id');
+          if (users.length > 0) {
+            searchConditions.push({ user: { $in: users.map(u => u._id) } });
+          }
+        }
+
+        filter.$or = searchConditions;
+      }
 
       const sort = {};
       if (req.query.sortBy) {
@@ -318,11 +364,19 @@ router.get(
       res.json({
         success: true,
         count: data.length,
-        pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1
+        },
         data,
+        searchQuery: req.query.q || null,
       });
     } catch (e) {
-      console.error("Error listing orders:", e);
+      console.error("Error searching orders:", e);
       res.status(500).json({ success: false, error: "Server error" });
     }
   }
