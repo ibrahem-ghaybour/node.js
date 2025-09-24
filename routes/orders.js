@@ -280,7 +280,7 @@ router.get(
     query("limit").optional().isInt({ min: 1, max: 100 }).toInt(),
     query("status")
       .optional()
-      .isIn(["pending", "paid", "shipped", "delivered", "cancelled"]),
+      .isIn(["pending", "paid", "shipped", "delivered", "cancelled", "refunded"]),
     query("minAmount").optional().isNumeric().toFloat(),
     query("maxAmount").optional().isNumeric().toFloat(),
     query("startDate").optional().isISO8601().toDate(),
@@ -416,6 +416,7 @@ router.patch(
       "shipped",
       "delivered",
       "cancelled",
+      "refunded",
     ]),
   ],
   async (req, res) => {
@@ -452,7 +453,7 @@ router.patch(
       .isString()
       .withMessage("Each order identifier must be a string"),
     body("status")
-      .isIn(["pending", "paid", "shipped", "delivered", "cancelled"])
+      .isIn(["pending", "paid", "shipped", "delivered", "cancelled", "refunded"])
       .withMessage("Invalid status"),
   ],
   async (req, res) => {
