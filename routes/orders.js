@@ -521,6 +521,83 @@ router.patch(
   }
 );
 
+// Bulk delete orders by array of IDs or orderCodes (admin/manager)
+router.delete(
+  "/bulk",
+  [
+    protect,
+    authorize("admin", "manager"),
+    body("orderIds")
+      .isArray({ min: 1 })
+      .withMessage("orderIds must be a non-empty array"),
+    body("orderIds.*")
+      .isString()
+      .withMessage("Each order identifier must be a string"),
+  ],
+  async (req, res) => {
+    const err = handleValidation(req, res);
+    if (err) return;
+    try {
+      const { orderIds } = req.body;
+
+      // Separate provided identifiers into Mongo ObjectIds and human codes like ORD-1002
+      const isObjectId = (v) => /^[a-fA-F0-9]{24}$/.test(v);
+      const mongoIds = orderIds.filter((v) => isObjectId(v));
+      const orderCodes = orderIds.filter((v) => !isObjectId(v));
+
+      const filter = { $or: [] };
+      if (mongoIds.length) filter.$or.push({ _id: { $in: mongoIds } });
+      if (orderCodes.length) filter.$or.push({ orderCode: { $in: orderCodes } });
+
+      if (filter.$or.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "No valid order identifiers provided",
+        });
+      }
+
+      // Find matching orders first to report which were found vs not
+      const foundOrders = await Order.find(filter).select(
+        "_id orderCode isActive"
+      );
+      if (!foundOrders.length) {
+        return res
+          .status(404)
+          .json({ success: false, error: "No matching orders found" });
+      }
+
+      const idsToUpdate = foundOrders.map((o) => o._id);
+      const updateRes = await Order.updateMany(
+        { _id: { $in: idsToUpdate } },
+        { $set: { isActive: false, updatedAt: Date.now() } }
+      );
+
+      // Fetch updated docs
+      const updated = await Order.find({ _id: { $in: idsToUpdate } })
+        .populate("user", "name email role")
+        .populate("items.product", "name price");
+
+      // Compute not found identifiers
+      const normalizedFound = new Set([
+        ...foundOrders.map((o) => o._id.toString()),
+        ...foundOrders.filter((o) => o.orderCode).map((o) => o.orderCode),
+      ]);
+      const notFound = orderIds.filter((id) => !normalizedFound.has(id));
+
+      res.json({
+        success: true,
+        matchedCount: foundOrders.length,
+        modifiedCount: updateRes.modifiedCount || 0,
+        notFound,
+        data: updated,
+      });
+    } catch (e) {
+      console.error("Error bulk deleting orders:", e);
+      res.status(500).json({ success: false, error: "Server error" });
+    }
+  }
+);
+
 // Cancel order by owner if still pending
 router.post(
   "/:id/cancel",
