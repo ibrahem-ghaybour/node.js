@@ -13,43 +13,21 @@ const handleValidation = (req, res) => {
   }
 };
 
-function parseRange(rangeStr) {
-  // Accept forms like 7d, 30d, 12w, 6m; default 30d
-  const m = /^([0-9]{1,3})([dwmy])$/i.exec(rangeStr || "30d");
-  const now = new Date();
-  if (!m) {
-    const d = new Date(now);
-    d.setDate(now.getDate() - 30);
-    return { start: d, end: now, unit: "day", count: 30 };
+// دالة لإرجاع start/end
+function getDateRange(req) {
+  let start, end;
+
+  if (req.query.start && req.query.end) {
+    start = new Date(req.query.start);
+    end = new Date(req.query.end);
+  } else {
+    // الحالة الافتراضية: آخر شهر من اليوم
+    end = new Date();
+    start = new Date();
+    start.setMonth(end.getMonth() - 1);
   }
-  const n = parseInt(m[1], 10);
-  const unit = m[2].toLowerCase();
-  const d = new Date(now);
-  let count = n;
-  switch (unit) {
-    case "d":
-      d.setDate(now.getDate() - n);
-      count = n;
-      return { start: d, end: now, unit: "day", count };
-    case "w":
-      d.setDate(now.getDate() - n * 7);
-      count = n * 7;
-      return { start: d, end: now, unit: "day", count };
-    case "m":
-      d.setMonth(now.getMonth() - n);
-      // We'll return days approximation (30*n) for the series
-      count = n * 30;
-      return { start: d, end: now, unit: "day", count };
-    case "y":
-      d.setFullYear(now.getFullYear() - n);
-      count = n * 365;
-      return { start: d, end: now, unit: "day", count };
-    default: {
-      const dd = new Date(now);
-      dd.setDate(now.getDate() - 30);
-      return { start: dd, end: now, unit: "day", count: 30 };
-    }
-  }
+
+  return { start, end };
 }
 
 // GET /api/stats/dashboard
@@ -58,23 +36,27 @@ router.get(
   [
     protect,
     authorize("admin", "manager"),
-    query("range").optional().isString(), // e.g., 30d
+    query("start").optional().isISO8601(),
+    query("end").optional().isISO8601(),
     query("limit").optional().isInt({ min: 1, max: 100 }),
   ],
   async (req, res) => {
     const err = handleValidation(req, res);
     if (err) return;
+
     try {
-      const { start, end } = parseRange(req.query.range);
+      const { start, end } = getDateRange(req);
+
+      // الفترة السابقة للمقارنة
       const prevEnd = new Date(start);
       const prevStart = new Date(start);
       prevStart.setTime(start.getTime() - (end.getTime() - start.getTime()));
+
       const limit = parseInt(req.query.limit) || 10;
 
-      // Definitions (sensible defaults)
-      const revenueStatuses = ["paid", "shipped", "delivered"]; // count towards revenue & sales
+      const revenueStatuses = ["paid", "shipped", "delivered"];
 
-      // Total Revenue & Sales (current period)
+      // Revenue & Sales (الحالي)
       const revenueAgg = await Order.aggregate([
         {
           $match: {
@@ -94,7 +76,7 @@ router.get(
       const totalRevenue = revenueAgg[0]?.totalRevenue || 0;
       const sales = revenueAgg[0]?.salesCount || 0;
 
-      // Total Revenue & Sales (previous equivalent period)
+      // Revenue & Sales (الفترة السابقة)
       const revenueAggPrev = await Order.aggregate([
         {
           $match: {
@@ -114,19 +96,27 @@ router.get(
       const totalRevenuePrev = revenueAggPrev[0]?.totalRevenue || 0;
       const salesPrev = revenueAggPrev[0]?.salesCount || 0;
 
-      // Subscriptions: new users created within range (current and previous)
+      // Subscriptions (مستخدمين جدد)
       const [subscriptions, subscriptionsPrev] = await Promise.all([
         User.countDocuments({ createdAt: { $gte: start, $lte: end } }),
         User.countDocuments({ createdAt: { $gte: prevStart, $lte: prevEnd } }),
       ]);
 
-      // Active Now: users with status 'active' updated within range (current and previous)
+      // Active users
       const [activeNow, activeNowPrev] = await Promise.all([
-        User.countDocuments({ status: "active", isActive: true, updatedAt: { $gte: start, $lte: end } }),
-        User.countDocuments({ status: "active", isActive: true, updatedAt: { $gte: prevStart, $lte: prevEnd } }),
+        User.countDocuments({
+          status: "active",
+          isActive: true,
+          updatedAt: { $gte: start, $lte: end },
+        }),
+        User.countDocuments({
+          status: "active",
+          isActive: true,
+          updatedAt: { $gte: prevStart, $lte: prevEnd },
+        }),
       ]);
 
-      // Overview: revenue per day within range
+      // Overview: الإيراد يوم بيوم
       const overviewAgg = await Order.aggregate([
         {
           $match: {
@@ -137,7 +127,9 @@ router.get(
         },
         {
           $group: {
-            _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            _id: {
+              $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+            },
             revenue: { $sum: "$totalAmount" },
             orders: { $sum: 1 },
           },
@@ -145,25 +137,30 @@ router.get(
         { $sort: { _id: 1 } },
       ]);
 
-      // Fill missing days with zeros
       const byDate = new Map(overviewAgg.map((r) => [r._id, r]));
       const series = [];
       const iter = new Date(start);
       while (iter <= end) {
         const key = iter.toISOString().slice(0, 10);
         const v = byDate.get(key) || { revenue: 0, orders: 0 };
-        series.push({ date: key, revenue: v.revenue || 0, orders: v.orders || 0 });
+        series.push({
+          date: key,
+          revenue: v.revenue || 0,
+          orders: v.orders || 0,
+        });
         iter.setDate(iter.getDate() + 1);
       }
 
-      // Recent Sales: latest orders
-      const recentSales = await Order.find({ isActive: true, status: { $in: revenueStatuses } })
+      // Recent Sales
+      const recentSales = await Order.find({
+        isActive: true,
+        status: { $in: revenueStatuses },
+      })
         .sort({ createdAt: -1 })
         .limit(limit)
         .populate("user", "name email")
         .select("totalAmount currency status createdAt user");
 
-      // Helper to compute percentage change vs previous period
       const pct = (curr, prev) => {
         if (prev === 0 && curr === 0) return 0;
         if (prev === 0) return 100;
@@ -174,14 +171,12 @@ router.get(
         success: true,
         range: { start, end },
         data: {
-          // Return current raw values for top-level metrics
           totalRevenue,
           subscriptions,
           sales,
           activeNow,
           overview: series,
           recentSales,
-          // Provide percentage change details separately for clarity
           change: {
             totalRevenue: pct(totalRevenue, totalRevenuePrev),
             subscriptions: pct(subscriptions, subscriptionsPrev),
