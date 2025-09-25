@@ -17,18 +17,11 @@ connectDB();
 // ⚠️ اضبط Helmet (الإعداد الافتراضي جيد عادة)
 app.use(helmet());
 
-// ✅ CORS مضبوط مع credentials
-const ALLOWED_ORIGINS = (process.env.APP_ORIGINS || "http://localhost:3000")
-  .split(",")
-  .map((s) => s.trim());
-
+// ✅ CORS مضبوط مع credentials (السماح لأي Origin)
+// ملاحظة: استخدام origin: true يعكس Origin الوارد من الطلب ويسمح للجميع،
+// وهو متوافق مع credentials: true (بعكس "*" التي لا تعمل مع credentials)
 const corsOptions = {
-  origin: (origin, cb) => {
-    // السماح أيضًا للـ SSR/health hits بدون Origin
-    if (!origin) return cb(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    return cb(new Error("Not allowed by CORS: " + origin), false);
-  },
+  origin: true,
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
