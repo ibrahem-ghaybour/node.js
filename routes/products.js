@@ -2,8 +2,43 @@ const express = require('express');
 const { body, validationResult, query } = require('express-validator');
 const Product = require('../models/Product');
 const { protect, authorize } = require('../middleware/auth');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 const router = express.Router();
+
+// Ensure upload directory exists
+const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
+const PRODUCT_UPLOAD_DIR = path.join(UPLOAD_ROOT, 'products');
+for (const dir of [UPLOAD_ROOT, PRODUCT_UPLOAD_DIR]) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+// Multer setup
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, PRODUCT_UPLOAD_DIR);
+  },
+  filename: function (req, file, cb) {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, unique + path.extname(file.originalname));
+  }
+});
+
+const imageFileFilter = (req, file, cb) => {
+  const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  if (allowed.includes(file.mimetype)) return cb(null, true);
+  return cb(new Error('Only image files are allowed'));
+};
+
+const upload = multer({
+  storage,
+  fileFilter: imageFileFilter,
+  limits: { fileSize: 5 * 1024 * 1024, files: 5 }
+});
 
 // @route   GET /api/products
 // @desc    Get all products with pagination
@@ -167,6 +202,96 @@ router.post('/', [
   }
 });
 
+// @route   POST /api/products/:id/images
+// @desc    Upload up to 5 images for a product
+// @access  Private
+router.post('/:id/images', [protect, upload.array('images', 5)], async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+
+    // Check ownership/admin
+    if (product.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Not authorized to update this product' });
+    }
+
+    const files = req.files || [];
+    if (!files.length) return res.status(400).json({ message: 'No images uploaded' });
+
+    const baseUrl = '/uploads/products';
+    const urls = files.map(f => `${baseUrl}/${path.basename(f.path)}`);
+
+    product.images = [...product.images, ...urls];
+    if (!product.primaryImage && urls.length) product.primaryImage = urls[0];
+    await product.save();
+
+    res.json({ success: true, data: { images: product.images, primaryImage: product.primaryImage } });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: error.message || 'Server error' });
+  }
+});
+
+// @route   PATCH /api/products/:id/primary-image
+// @desc    Set the primary image for a product
+// @access  Private
+router.patch('/:id/primary-image', [protect, body('url').isString().notEmpty()], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+
+    if (product.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Not authorized to update this product' });
+    }
+
+    const { url } = req.body;
+    if (!product.images.includes(url)) {
+      return res.status(400).json({ message: 'URL is not part of product images' });
+    }
+    product.primaryImage = url;
+    await product.save();
+    res.json({ success: true, data: { primaryImage: product.primaryImage } });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   DELETE /api/products/:id/images
+// @desc    Remove a specific image from a product
+// @access  Private
+router.delete('/:id/images', [protect, body('url').isString().notEmpty()], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+
+    if (product.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Not authorized to update this product' });
+    }
+
+    const { url } = req.body;
+    if (!product.images.includes(url)) return res.status(404).json({ message: 'Image not found on product' });
+
+    // Remove from array
+    product.images = product.images.filter(u => u !== url);
+    if (product.primaryImage === url) product.primaryImage = product.images[0] || '';
+
+    // Delete file from disk (best-effort)
+    const filePath = path.join(process.cwd(), url.replace('/uploads', 'uploads'));
+    fs.unlink(filePath, () => {});
+
+    await product.save();
+    res.json({ success: true, data: { images: product.images, primaryImage: product.primaryImage } });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // @route   PUT /api/products/:id
 // @desc    Update product
 // @access  Private
@@ -255,6 +380,16 @@ router.delete('/:id', [
     // Check if user is the creator or admin
     if (product.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Not authorized to delete this product' });
+    }
+
+    // Cleanup files (best-effort)
+    const toDelete = new Set([...(product.images || [])]);
+    if (product.primaryImage) toDelete.add(product.primaryImage);
+    for (const url of toDelete) {
+      try {
+        const filePath = path.join(process.cwd(), url.replace('/uploads', 'uploads'));
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      } catch (e) {}
     }
 
     await product.remove();

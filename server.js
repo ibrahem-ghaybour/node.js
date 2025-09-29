@@ -38,6 +38,9 @@ app.use(morgan("combined"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve uploaded files statically
+app.use("/uploads", express.static("uploads"));
+
 (function sanityEnvCheck() {
   const has = (k) => (process.env[k] ? "OK" : "MISSING");
   console.log("[ENV] MONGODB_URI:", has("MONGODB_URI"));

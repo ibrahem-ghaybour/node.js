@@ -28,6 +28,16 @@ const productSchema = new mongoose.Schema({
     min: [0, 'Stock must be a positive number'],
     default: 0
   },
+  // Array of image URLs
+  images: {
+    type: [String],
+    default: []
+  },
+  // Optional main/primary image URL
+  primaryImage: {
+    type: String,
+    default: ''
+  },
   isActive: {
     type: Boolean,
     default: true
