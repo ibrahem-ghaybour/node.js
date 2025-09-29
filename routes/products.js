@@ -3,30 +3,11 @@ const { body, validationResult, query } = require('express-validator');
 const Product = require('../models/Product');
 const { protect, authorize } = require('../middleware/auth');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 
 const router = express.Router();
 
-// Ensure upload directory exists
-const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
-const PRODUCT_UPLOAD_DIR = path.join(UPLOAD_ROOT, 'products');
-for (const dir of [UPLOAD_ROOT, PRODUCT_UPLOAD_DIR]) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
-
-// Multer setup
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, PRODUCT_UPLOAD_DIR);
-  },
-  filename: function (req, file, cb) {
-    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, unique + path.extname(file.originalname));
-  }
-});
+// Multer setup: use memory storage to be compatible with serverless (no disk writes)
+const storage = multer.memoryStorage();
 
 const imageFileFilter = (req, file, cb) => {
   const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
@@ -218,14 +199,17 @@ router.post('/:id/images', [protect, upload.array('images', 5)], async (req, res
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ message: 'No images uploaded' });
 
-    const baseUrl = '/uploads/products';
-    const urls = files.map(f => `${baseUrl}/${path.basename(f.path)}`);
+    // Hotfix behavior: without cloud storage configured, reject to avoid crashing on serverless
+    const hasCloud = !!(process.env.CLOUDINARY_URL || (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET));
+    if (!hasCloud) {
+      return res.status(503).json({
+        success: false,
+        message: 'Image storage is not configured for this deployment. Please configure Cloudinary or another storage provider.'
+      });
+    }
 
-    product.images = [...product.images, ...urls];
-    if (!product.primaryImage && urls.length) product.primaryImage = urls[0];
-    await product.save();
-
-    res.json({ success: true, data: { images: product.images, primaryImage: product.primaryImage } });
+    // If storage is configured, this route should be updated to upload buffers to the provider.
+    return res.status(501).json({ success: false, message: 'Upload handler not implemented yet for the configured storage.' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: error.message || 'Server error' });
@@ -279,10 +263,6 @@ router.delete('/:id/images', [protect, body('url').isString().notEmpty()], async
     // Remove from array
     product.images = product.images.filter(u => u !== url);
     if (product.primaryImage === url) product.primaryImage = product.images[0] || '';
-
-    // Delete file from disk (best-effort)
-    const filePath = path.join(process.cwd(), url.replace('/uploads', 'uploads'));
-    fs.unlink(filePath, () => {});
 
     await product.save();
     res.json({ success: true, data: { images: product.images, primaryImage: product.primaryImage } });
@@ -380,16 +360,6 @@ router.delete('/:id', [
     // Check if user is the creator or admin
     if (product.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Not authorized to delete this product' });
-    }
-
-    // Cleanup files (best-effort)
-    const toDelete = new Set([...(product.images || [])]);
-    if (product.primaryImage) toDelete.add(product.primaryImage);
-    for (const url of toDelete) {
-      try {
-        const filePath = path.join(process.cwd(), url.replace('/uploads', 'uploads'));
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      } catch (e) {}
     }
 
     await product.remove();
