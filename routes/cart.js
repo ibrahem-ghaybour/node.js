@@ -59,7 +59,7 @@ router.get("/", protect, async (req, res) => {
 // Get all user carts (admin/manager only)
 router.get("/all", protect, authorize("admin", "manager"), async (req, res) => {
   try {
-    const carts = await Cart.find()
+    const carts = await Cart.find({ items: { $ne: [] } })
       .populate("user", "name email role")
       .populate("items.product", "name price description category imageUrl");
     
