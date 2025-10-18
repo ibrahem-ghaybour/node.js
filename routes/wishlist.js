@@ -81,6 +81,42 @@ router.get("/all", protect, authorize("admin", "manager"), async (req, res) => {
   }
 });
 
+// @route   GET /api/wishlist/:id
+// @desc    Get specific user's wishlist by user ID (admin/manager only)
+// @access  Private (Admin/Manager)
+router.get("/:id", protect, authorize("admin", "manager"), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const wishlists = await Wishlist.find({ userId: id })
+      .populate("userId", "name email role")
+      .populate("productId", "name price description category imageUrl")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!wishlists || wishlists.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "No wishlist items found for this user" 
+      });
+    }
+
+    res.json({
+      success: true,
+      user: wishlists[0].userId,
+      count: wishlists.length,
+      data: wishlists.map(w => ({
+        _id: w._id,
+        product: w.productId,
+        createdAt: w.createdAt
+      }))
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 router.post("/", protect, async (req, res) => {
   try {
     const { productId } = req.body;
