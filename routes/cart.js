@@ -59,13 +59,28 @@ router.get("/", protect, async (req, res) => {
 // Get all user carts (admin/manager only)
 router.get("/all", protect, authorize("admin", "manager"), async (req, res) => {
   try {
-    const carts = await Cart.find({ items: { $ne: [] } })
-      .populate("user", "name email role")
-      .populate("items.product", "name price description category imageUrl");
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const query = { items: { $ne: [] } };
+    
+    const [carts, totalCount] = await Promise.all([
+      Cart.find(query)
+        .populate("user", "name email role")
+        .populate("items.product", "name price description category imageUrl")
+        .skip(skip)
+        .limit(limit)
+        .sort({ updatedAt: -1 }),
+      Cart.countDocuments(query)
+    ]);
     
     res.json({ 
       success: true, 
       count: carts.length,
+      total: totalCount,
+      page,
+      totalPages: Math.ceil(totalCount / limit),
       data: carts 
     });
   } catch (e) {
