@@ -1,6 +1,6 @@
 const express = require("express");
 const { body, param, query, validationResult } = require("express-validator");
-const { protect } = require("../middleware/auth");
+const { protect, authorize } = require("../middleware/auth");
 const Cart = require("../models/Cart");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
@@ -52,6 +52,24 @@ router.get("/", protect, async (req, res) => {
     res.json({ success: true, data: cart });
   } catch (e) {
     console.error("Error getting cart:", e);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+// Get all user carts (admin/manager only)
+router.get("/all", protect, authorize("admin", "manager"), async (req, res) => {
+  try {
+    const carts = await Cart.find()
+      .populate("user", "name email role")
+      .populate("items.product", "name price description category imageUrl");
+    
+    res.json({ 
+      success: true, 
+      count: carts.length,
+      data: carts 
+    });
+  } catch (e) {
+    console.error("Error getting all carts:", e);
     res.status(500).json({ success: false, error: "Server error" });
   }
 });

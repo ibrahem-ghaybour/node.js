@@ -5,13 +5,20 @@ const { getCurrency, setCurrency } = require("../utils/settings");
 
 const router = express.Router();
 
-// Get current settings (currency)
+// Get current settings (currency) or update if currency provided
 router.get("/", async (req, res) => {
   try {
-    const currency = await getCurrency();
-    res.json({ success: true, data: { currency } });
+    // If currency is provided in body, update it
+    if (req.body.currency) {
+      const newCurrency = await setCurrency(req.body.currency);
+      res.json({ success: true, data: { currency: newCurrency } });
+    } else {
+      // Otherwise, just return current currency
+      const currency = await getCurrency();
+      res.json({ success: true, data: { currency } });
+    }
   } catch (e) {
-    console.error("Error getting settings:", e);
+    console.error("Error getting/updating settings:", e);
     res.status(500).json({ success: false, error: "Server error" });
   }
 });
