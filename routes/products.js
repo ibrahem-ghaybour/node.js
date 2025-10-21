@@ -3,8 +3,16 @@ const { body, validationResult, query } = require('express-validator');
 const Product = require('../models/Product');
 const { protect, authorize } = require('../middleware/auth');
 const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
 
 const router = express.Router();
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 // Multer setup: use memory storage to be compatible with serverless (no disk writes)
 const storage = multer.memoryStorage();
@@ -199,8 +207,8 @@ router.post('/:id/images', [protect, upload.array('images', 5)], async (req, res
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ message: 'No images uploaded' });
 
-    // Hotfix behavior: without cloud storage configured, reject to avoid crashing on serverless
-    const hasCloud = !!(process.env.CLOUDINARY_URL || (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET));
+    // Check if cloud storage is configured
+    const hasCloud = !!(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
     if (!hasCloud) {
       return res.status(503).json({
         success: false,
@@ -208,8 +216,47 @@ router.post('/:id/images', [protect, upload.array('images', 5)], async (req, res
       });
     }
 
-    // If storage is configured, this route should be updated to upload buffers to the provider.
-    return res.status(501).json({ success: false, message: 'Upload handler not implemented yet for the configured storage.' });
+    // Upload images to Cloudinary
+    const uploadPromises = files.map(file => {
+      return new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: 'products',
+            resource_type: 'image',
+            transformation: [
+              { width: 1000, height: 1000, crop: 'limit' },
+              { quality: 'auto' }
+            ]
+          },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result.secure_url);
+          }
+        );
+        uploadStream.end(file.buffer);
+      });
+    });
+
+    const imageUrls = await Promise.all(uploadPromises);
+
+    // Add new images to product
+    product.images = [...product.images, ...imageUrls];
+    
+    // Set first image as primary if no primary image exists
+    if (!product.primaryImage && imageUrls.length > 0) {
+      product.primaryImage = imageUrls[0];
+    }
+
+    await product.save();
+
+    res.json({
+      success: true,
+      data: {
+        images: product.images,
+        primaryImage: product.primaryImage,
+        uploadedCount: imageUrls.length
+      }
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: error.message || 'Server error' });
