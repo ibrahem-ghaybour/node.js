@@ -51,10 +51,12 @@ app.use("/uploads", express.static("uploads"));
 })();
 
 // المسارات
+app.use("/api/home", require("./routes/home"));
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/users", require("./routes/users"));
 app.use("/api/products", require("./routes/products"));
 app.use("/api/categories", require("./routes/categories"));
+app.use("/api/reviews", require("./routes/reviews"));
 app.use("/api/governorates", require("./routes/governorates"));
 app.use("/api/cities", require("./routes/cities"));
 app.use("/api/wishlist", require("./routes/wishlist"));
@@ -79,12 +81,14 @@ app.get("/", (req, res) => {
     message: "Express MongoDB Backend API",
     version: "1.0.0",
     endpoints: {
+      home: "/api/home",
       auth: "/api/auth",
       login: "/api/auth/login",
       register: "/api/auth/register",
       refresh: "/api/auth/refresh",
       users: "/api/users",
       products: "/api/products",
+      reviews: "/api/reviews",
       health: "/api/health",
       categories: "/api/categories",
       governorates: "/api/governorates",
